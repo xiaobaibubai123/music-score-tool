@@ -1,0 +1,19 @@
+{
+  "name": "music-score-tool-tools",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Web 电子乐谱工具 —— 扒谱辅助与自动化测试脚本",
+  "scripts": {
+    "test:unit": "node parser-test.js",
+    "test:player": "node verify.js",
+    "test:editor": "node verify-editor.js",
+    "test:embed": "node verify-embed.js",
+    "test:mp3": "node verify-mp3.js",
+    "test": "node parser-test.js && node verify.js && node verify-editor.js && node verify-embed.js && node verify-mp3.js"
+  },
+  "dependencies": {
+    "@tonejs/midi": "^2.0.28",
+    "lamejs": "^1.2.1",
+    "puppeteer-core": "^23.11.1"
+  }
+}

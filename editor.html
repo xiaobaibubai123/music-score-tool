@@ -1,0 +1,903 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>乐谱工作台 · 写谱 + 即时试听</title>
+<!-- vendor/ 是长期强缓存的，换库版本时把下面的 v 数字加一即可让访问者更新 -->
+<script src="vendor/Tone.js?v=2"></script>
+<script src="vendor/Midi.js?v=2"></script>
+<!-- lame.min.js：MP3 编码器（LAME 的 JS 移植版），LGPL 许可，来源 https://lame.sourceforge.net/ -->
+<script src="vendor/lame.min.js?v=2"></script>
+<style>
+  :root{--bg:#12141a;--panel:#1b1e27;--line:#2c3140;--fg:#e8ecf4;--dim:#98a2b8;
+        --accent:#4da3ff;--ok:#3ddc97;--bad:#ff6b6b;--warn:#ffc857;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font:14px/1.6 "Segoe UI","Microsoft YaHei",system-ui,sans-serif;padding:16px 20px 60px}
+  header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:6px}
+  h1{font-size:19px;margin:0}
+  nav a{color:var(--accent);text-decoration:none;font-size:13px;border:1px solid var(--line);
+        padding:5px 12px;border-radius:7px;background:#232a37}
+  nav a:hover{background:#2f3948}
+  .sub{color:var(--dim);font-size:13px;margin:0 0 14px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+         padding:14px 16px;margin-bottom:14px}
+  .panel h2{font-size:14px;margin:0 0 10px;color:var(--accent);
+            text-transform:uppercase;letter-spacing:.5px}
+  button{background:#28303f;color:var(--fg);border:1px solid var(--line);border-radius:7px;
+         padding:7px 14px;font-size:13px;cursor:pointer;margin:0 6px 6px 0}
+  button:hover:not(:disabled){background:#333d4f;border-color:#465268}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#08131f;font-weight:600}
+  button.primary:hover:not(:disabled){background:#69b4ff}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  #status{font-weight:600;padding:9px 12px;border-radius:8px;background:#20242f;
+          border-left:4px solid var(--dim);margin-bottom:12px;min-height:20px}
+  #status.ok{border-left-color:var(--ok)} #status.bad{border-left-color:var(--bad)}
+  #status.warn{border-left-color:var(--warn)}
+  .mono{font-family:Consolas,monospace;font-size:12px;color:var(--dim)}
+  .grid{display:grid;grid-template-columns:minmax(380px,1fr) minmax(420px,1.15fr);gap:14px;align-items:start}
+  @media(max-width:980px){.grid{grid-template-columns:1fr}}
+  #src{width:100%;height:390px;background:#0e1016;color:#dfe6f3;border:1px solid var(--line);
+       border-radius:8px;padding:12px 14px;font:13px/1.85 Consolas,"Courier New",monospace;
+       resize:vertical;tab-size:2;white-space:pre;overflow:auto}
+  #src:focus{outline:none;border-color:var(--accent)}
+  select,input[type=number]{background:#28303f;color:var(--fg);border:1px solid var(--line);
+       border-radius:7px;padding:6px 9px;font-size:13px}
+  label.chk{display:inline-flex;align-items:center;gap:5px;margin-right:10px;font-size:13px;cursor:pointer}
+  input[type=checkbox]{accent-color:var(--accent)}
+  #roll{width:100%;height:250px;background:#0e1016;border:1px solid var(--line);border-radius:8px;display:block}
+  #msgs{margin-top:10px;max-height:150px;overflow:auto}
+  .msg{font:12px/1.6 Consolas,monospace;padding:5px 9px;border-radius:6px;margin-bottom:5px;
+       background:#2a1d1f;border-left:3px solid var(--bad);cursor:pointer}
+  .msg.warn{background:#2a2618;border-left-color:var(--warn)}
+  .msg:hover{filter:brightness(1.25)}
+  .trackline{display:flex;align-items:center;gap:8px;font:12px Consolas,monospace;
+             padding:4px 0;border-bottom:1px solid #232834}
+  .swatch{width:10px;height:10px;border-radius:2px;flex:0 0 auto}
+  details{background:#191d26;border:1px solid var(--line);border-radius:8px;padding:10px 14px}
+  summary{cursor:pointer;color:var(--accent);font-weight:600;font-size:13px}
+  details table{border-collapse:collapse;margin-top:8px;font-size:12.5px}
+  details td{padding:3px 14px 3px 0;vertical-align:top}
+  details code{background:#0e1016;padding:1px 6px;border-radius:4px;
+               font-family:Consolas,monospace;color:#8fd0ff}
+  .hint{color:var(--dim);font-size:12.5px;margin-top:8px}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🎼 乐谱工作台</h1>
+  <nav>
+    <a href="index.html" target="_top">🎹 去演奏（键盘 / MIDI 文件）</a>
+  </nav>
+</header>
+<p class="sub">左边用文字写乐谱，右边立刻听到效果 · 全部依赖本地加载 · 作品自动保存在浏览器里</p>
+
+<div id="status">点一下页面激活音频，然后改左边的内容 → 按「▶ 试听」</div>
+
+<div class="grid">
+
+  <!-- ============ 左：编辑器 ============ -->
+  <div>
+    <div class="panel">
+      <h2>1 · 写乐谱</h2>
+      <textarea id="src" spellcheck="false"></textarea>
+
+      <div class="row" style="margin-top:10px">
+        <button class="primary" id="btnPlay">▶ 试听</button>
+        <button id="btnPause">⏸ 暂停</button>
+        <button id="btnStop">■ 停止</button>
+        <label class="chk"><input type="checkbox" id="chkLoop" checked> 循环</label>
+        <label class="chk"><input type="checkbox" id="chkClick"> 节拍器</label>
+        <span class="mono">速度 BPM</span>
+        <input type="number" id="bpm" min="20" max="300" step="1" value="120" style="width:80px">
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button id="btnOpen">📂 打开乐谱文件</button>
+        <input type="file" id="openFile" accept=".txt,.music,.score,text/plain" hidden>
+        <button id="btnExportMid">⬇ 导出 .mid</button>
+        <button id="btnExportMp3">⬇ 导出 .mp3</button>
+        <button id="btnExportJson">⬇ 导出 .json</button>
+        <button id="btnLoadDemo">载入示例</button>
+        <button id="btnClear">清空重写</button>
+      </div>
+      <div class="mono" id="clock" style="margin-top:8px">0.00 / 0.00 s</div>
+    </div>
+
+    <div class="panel">
+      <h2>2 · 语法速查</h2>
+      <details open>
+        <summary>怎么写出音符（点击展开/收起）</summary>
+        <table>
+          <tr><td><code>C4 D4 E4</code></td><td>白键音，一拍一个（C4 就是中央 C）</td></tr>
+          <tr><td><code>C#4</code> <code>Bb3</code></td><td>升号用 <code>#</code>，降号用 <code>b</code></td></tr>
+          <tr><td><code>C5</code> <code>C3</code></td><td>数字是八度，越大越高</td></tr>
+          <tr><td><code>C4:2</code></td><td>时值 = 2 拍（半音符）</td></tr>
+          <tr><td><code>:w :h :q :e :s</code></td><td>全 / 半 / 四分 / 八分 / 十六分音符</td></tr>
+          <tr><td><code>[C4 E4 G4]:2</code></td><td>和弦：三个音一起弹，一起持续 2 拍</td></tr>
+          <tr><td><code>r</code> 或 <code>-</code></td><td>休止符（不发声，但占时间）</td></tr>
+          <tr><td><code>C4 C4 | G4 G4</code></td><td><code>|</code> 是小节线，只帮助你看，不影响发声</td></tr>
+          <tr><td><code>主旋律:</code></td><td>以冒号结尾的行 = 新开一条轨道；写多条轨道就是多声部</td></tr>
+          <tr><td><code>bpm 100</code></td><td>设置速度</td></tr>
+          <tr><td><code>title 我的曲子</code></td><td>设置曲名</td></tr>
+          <tr><td><code>time 3/4</code></td><td>设置拍号（会用来检查每小节拍数）</td></tr>
+          <tr><td><code># 注释</code></td><td>以 <code>#</code> 或 <code>//</code> 开头的内容会被忽略</td></tr>
+        </table>
+        <div class="hint">提示：每行结尾会自动当作一次小节检查，写错拍数会在下面给出黄色提醒。</div>
+      </details>
+    </div>
+  </div>
+
+  <!-- ============ 右：预览 ============ -->
+  <div>
+    <div class="panel">
+      <h2>3 · 乐谱与试听</h2>
+      <canvas id="roll"></canvas>
+      <div class="mono" id="info" style="margin-top:8px">解析中…</div>
+      <div id="msgs"></div>
+    </div>
+
+    <div class="panel">
+      <h2>4 · 轨道（可单独静音试听）</h2>
+      <div id="tracks" class="mono">—</div>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* ============================================================
+   0. 基础工具
+   ============================================================ */
+const $ = (id) => document.getElementById(id);
+const statusEl = $('status');
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+function setStatus(msg, kind) { statusEl.textContent = msg; statusEl.className = kind || ''; }
+function fail(where, err) {
+  const m = (err && (err.message || err)) + '';
+  setStatus('❌ ' + where + ' 失败：' + m, 'bad');
+  console.error(where, err);
+}
+const Tone = window.Tone;
+const MidiCtor = window.Midi && (window.Midi.Midi || window.Midi);
+const PALETTE = ['#4da3ff', '#3ddc97', '#ffc857', '#ff6b6b', '#c792ea', '#ff9f68',
+                 '#5ee0d8', '#f78fb3', '#a0e57c', '#89a7ff'];
+
+/* ============================================================
+   1. 乐谱 DSL 解析器
+   ============================================================ */
+const STEP = { c: 0, d: 2, e: 4, f: 5, g: 7, a: 9, b: 11 };
+const DUR_WORDS = { w: 4, h: 2, q: 1, e: 0.5, s: 0.25, t: 0.125 };
+const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+const midiName = (m) => NOTE_NAMES[((m % 12) + 12) % 12] + (Math.floor(m / 12) - 1);
+
+function parsePitch(tok) {
+  const m = /^([A-Ga-g])((?:#|b|x)*)(-?\d+)$/.exec(tok);
+  if (!m) return null;
+  let semi = STEP[m[1].toLowerCase()];
+  for (const ch of m[2]) { if (ch === '#') semi++; else if (ch === 'b') semi--; else if (ch === 'x') semi += 2; }
+  return (parseInt(m[3], 10) + 1) * 12 + semi;
+}
+function parseDur(s) {
+  if (s == null || s === '') return 1;
+  const k = String(s).toLowerCase();
+  if (DUR_WORDS[k] != null) return DUR_WORDS[k];
+  const n = parseFloat(s);
+  return (isNaN(n) || n <= 0) ? null : n;
+}
+const round2 = (n) => Math.round(n * 100) / 100;
+
+function parseScore(text) {
+  const errors = [], warnings = [], tracks = [];
+  let cur = null, bpm = 120, beatsPerBar = 4, title = '', timeSig = '4/4';
+
+  const newTrack = (name) => {
+    const t = { name: name || ('Track ' + (tracks.length + 1)), notes: [], pos: 0, lastBarAt: 0 };
+    tracks.push(t); return t;
+  };
+  const checkBar = (line) => {
+    const atBar = cur.pos - cur.lastBarAt;
+    if (atBar > 1e-6 && Math.abs(atBar - beatsPerBar) > 1e-6) {
+      warnings.push({ line, msg: '第 ' + line + ' 行：第 ' + (Math.floor(cur.lastBarAt / beatsPerBar) + 1) +
+        ' 小节是 ' + round2(atBar) + ' 拍，' + timeSig + ' 每小节应该是 ' + round2(beatsPerBar) + ' 拍' });
+    }
+    cur.lastBarAt = cur.pos;
+  };
+
+  text.split(/\r?\n/).forEach((raw, i) => {
+    const line = i + 1;
+    const s = raw.replace(/(^|\s)(#|\/\/).*$/, '$1').trim();
+    if (!s) return;
+
+    const dir = /^(bpm|title|time)\s+(.+)$/i.exec(s);
+    if (dir) {
+      const k = dir[1].toLowerCase(), v = dir[2].trim();
+      if (k === 'bpm') {
+        const n = parseFloat(v);
+        if (!(n > 0)) errors.push({ line, msg: 'bpm 必须是正数，收到 "' + v + '"' });
+        else bpm = n;
+      } else if (k === 'title') title = v;
+      else {
+        const m = /^(\d+)\s*\/\s*(\d+)$/.exec(v);
+        if (!m || +m[2] === 0) errors.push({ line, msg: '拍号要写成 4/4 这样的形式，收到 "' + v + '"' });
+        else { timeSig = m[1] + '/' + m[2]; beatsPerBar = (+m[1]) * 4 / (+m[2]); }
+      }
+      return;
+    }
+
+    const th = /^([^:]+):\s*$/.exec(s);
+    if (th) {
+      const name = th[1].trim();
+      // 同名轨道 = 接着往下写，而不是新开一条（方便按乐段分段书写）
+      cur = tracks.find(t => t.name === name) || newTrack(name);
+      return;
+    }
+    if (!cur) cur = newTrack('');
+
+    // 括号感知分词：和弦 [C4 E4 G4]:2 必须保持为一个 token
+    const tokens = (s.replace(/\|/g, ' | ').match(/\[[^\]]*\](?::\S*)?|\S+/g) || []);
+
+    for (const tok of tokens) {
+      if (tok === '|') { checkBar(line); continue; }
+
+      let durStr = null, items = null;
+      const chord = /^\[([^\]]*)\](?::(.*))?$/.exec(tok);
+      const atom = /^([A-Ga-g][#bx]*-?\d+|[A-Za-z_]+|[-_])(?::(.*))?$/.exec(tok);
+      if (chord) { items = chord[1].trim().split(/\s+/).filter(Boolean); durStr = chord[2]; }
+      else if (atom) { items = [atom[1]]; durStr = atom[2]; }
+      else { errors.push({ line, msg: '看不懂的记号 "' + tok + '"（音符写成 C4 / F#3 / [C4 E4 G4]:2 / r，小节线用 |）' }); continue; }
+
+      const dur = parseDur(durStr);
+      if (dur == null) { errors.push({ line, msg: '时值 "' + durStr + '" 无效：可用拍数数字，或 w h q e s' }); continue; }
+
+      const start = cur.pos;
+      for (const it of items) {
+        if (/^(r|rest|_|-)$/i.test(it)) continue;
+        const midi = parsePitch(it);
+        if (midi == null) { errors.push({ line, msg: '无法识别的音名 "' + it + '"（写成 C4、F#3、Bb5 这样）' }); continue; }
+        cur.notes.push({ midi, name: midiName(midi), beat: start, durBeats: dur, velocity: 0.85 });
+      }
+      cur.pos = start + dur;
+    }
+    if (cur.pos > cur.lastBarAt) checkBar(line);
+  });
+
+  const clean = tracks.map((t, i) => ({ index: i, name: t.name, notes: t.notes }))
+                      .filter(t => t.notes.length > 0);
+  let totalBeats = 0;
+  clean.forEach(t => t.notes.forEach(n => { totalBeats = Math.max(totalBeats, n.beat + n.durBeats); }));
+  const spb = 60 / bpm;
+  clean.forEach(t => t.notes.forEach(n => { n.time = n.beat * spb; n.duration = n.durBeats * spb; }));
+
+  return { title, bpm, timeSig, beatsPerBar, totalBeats, duration: totalBeats * spb,
+           tracks: clean, errors, warnings };
+}
+
+/* ============================================================
+   2. 音频引擎
+   ============================================================ */
+let synth = null, click = null, audioReady = false;
+async function initAudio() {
+  if (audioReady) return;
+  if (!Tone) throw new Error('Tone.js 未加载');
+  await Tone.start();
+  const reverb = new Tone.Reverb({ decay: 2.0, preDelay: 0.01, wet: 0.16 }).toDestination();
+  synth = new Tone.PolySynth(Tone.Synth, {
+    maxPolyphony: 64,
+    oscillator: { type: 'triangle' },
+    envelope: { attack: 0.012, decay: 0.18, sustain: 0.32, release: 1.0 }
+  });
+  synth.set({ detune: 4 });
+  const filter = new Tone.Filter({ frequency: 5200, type: 'lowpass', rolloff: -12 });
+  synth.connect(filter); filter.connect(reverb);
+  synth.volume.value = -8;
+
+  click = new Tone.MembraneSynth({
+    pitchDecay: 0.008, octaves: 2,
+    envelope: { attack: 0.001, decay: 0.03, sustain: 0, release: 0.01 }
+  }).toDestination();
+  click.volume.value = -14;
+  audioReady = true;
+}
+const unlock = () => { initAudio().catch(e => fail('初始化音频', e)); };
+document.addEventListener('pointerdown', unlock);
+
+/* ============================================================
+   3. 示例
+   ============================================================ */
+const DEMOS = {
+  twinkle: {
+    label: '小星星（两条轨道）',
+    text: `# 小星星 —— 主旋律 + 低音
+# 改改音符再按「▶ 试听」试试
+title 小星星
+bpm 100
+time 4/4
+
+主旋律:
+  C4 C4 G4 G4 | A4 A4 G4:2 |
+  F4 F4 E4 E4 | D4 D4 C4:2 |
+
+低音:
+  C3:4       | F3:2 C3:2 |
+  F3:2 C3:2  | G3:2 C3:2 |`
+  },
+  canon: {
+    label: '卡农和弦进行（和弦语法）',
+    text: `# 卡农进行 C - G - Am - Em - F - C - F - G
+title 卡农进行
+bpm 84
+time 4/4
+
+和弦:
+  [C3 E3 G3]:4 | [G2 B2 D3]:4 | [A2 C3 E3]:4 | [E2 G2 B2]:4 |
+  [F2 A2 C3]:4 | [C3 E3 G3]:4 | [F2 A2 C3]:4 | [G2 B2 D3]:4 |
+
+旋律:
+  E4:2 G4:2 | D4:2 G4:2 | C4:2 E4:2 | B3:2 E4:2 |
+  A3:2 C4:2 | G3:2 C4:2 | A3:2 C4:2 | B3:4 |`
+  },
+  syntax: {
+    label: '语法总览（各种写法）',
+    text: `# 把所有写法都演示一遍
+title 语法总览
+bpm 120
+time 4/4
+
+白键音:   C4 D4 E4 F4 | G4 A4 B4 C5 |
+升降号:   C#4 Db4 F#4 Bb3 | B#3 Cb5 C4 B3 |
+时值数字: C4:4 | C4:2 C4:2 | C4 C4 C4 C4 | C4:0.5 C4:0.5 C4:0.5 C4:0.5 C4:2 |
+时值字母: C4:w | C4:h C4:h | C4:q C4:q C4:q C4:q | C4:e C4:e C4:s C4:s C4:q C4:q |
+和弦:     [C4 E4 G4]:2 [F4 A4 C5]:2 | [G3 B3 D4]:4 |
+休止符:   C4 r C4 r | C4:2 r:2 |
+高八度:   C6 B5 A5 G5 | F5 E5 D5 C5 |`
+  }
+};
+
+/* ============================================================
+   4. 状态与解析
+   ============================================================ */
+let parsed = null;          // parseScore 的结果
+const muted = new Set();    // 被静音的轨道 index
+let lastText = '';
+
+const src = $('src');
+const STORE_KEY = 'musicmaker.score.dsl';
+
+function loadInitialText() {
+  try {
+    const saved = localStorage.getItem(STORE_KEY);
+    if (saved && saved.trim()) return saved;
+  } catch (e) { /* 隐私模式下 localStorage 可能不可用 */ }
+  return DEMOS.twinkle.text;
+}
+
+function renderMessages(p) {
+  const host = $('msgs');
+  host.innerHTML = '';
+  const add = (m, kind) => {
+    const d = document.createElement('div');
+    d.className = 'msg' + (kind === 'warn' ? ' warn' : '');
+    d.textContent = (kind === 'warn' ? '⚠ ' : '✖ ') + m.msg;
+    d.title = '点击跳到第 ' + m.line + ' 行';
+    d.onclick = () => jumpToLine(m.line);
+    host.appendChild(d);
+  };
+  p.errors.forEach(e => add(e));
+  p.warnings.forEach(w => add(w, 'warn'));
+  if (!p.errors.length && !p.warnings.length) {
+    host.innerHTML = '<div class="mono" style="color:#3ddc97">✔ 没有发现语法问题</div>';
+  }
+}
+
+function jumpToLine(line) {
+  const lines = src.value.split('\n');
+  let off = 0;
+  for (let i = 0; i < line - 1 && i < lines.length; i++) off += lines[i].length + 1;
+  const end = off + (lines[line - 1] || '').length;
+  src.focus();
+  src.setSelectionRange(off, end);
+}
+
+function renderTracks(p) {
+  const host = $('tracks');
+  host.innerHTML = '';
+  if (!p.tracks.length) { host.innerHTML = '—'; return; }
+  p.tracks.forEach((t, i) => {
+    const row = document.createElement('div');
+    row.className = 'trackline';
+    const color = PALETTE[i % PALETTE.length];
+    let lo = 127, hi = 0;
+    for (const n of t.notes) { if (n.midi < lo) lo = n.midi; if (n.midi > hi) hi = n.midi; }
+    const label = document.createElement('label');
+    label.style.cssText = 'display:flex;align-items:center;gap:8px;flex:1;cursor:pointer';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.checked = !muted.has(t.index);
+    cb.onchange = () => {
+      if (cb.checked) muted.delete(t.index); else muted.add(t.index);
+      drawRoll();
+      if (playing) { setStatus('⚠ 轨道开关已改，按「■ 停止」后重新试听', 'warn'); }
+    };
+    const sw = document.createElement('span');
+    sw.className = 'swatch'; sw.style.background = color;
+    const nm = document.createElement('span');
+    nm.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+    nm.textContent = t.name;
+    const meta = document.createElement('span');
+    meta.style.color = '#7d8798';
+    meta.textContent = t.notes.length + ' 音 · ' + midiName(lo) + '–' + midiName(hi);
+    label.append(cb, sw, nm, meta);
+    row.appendChild(label);
+    host.appendChild(row);
+  });
+}
+
+/** 解析文本并刷新整个预览；返回 true 表示解析成功 */
+function reparse(showStatus) {
+  const p = parseScore(src.value);
+  parsed = p;
+  muted.forEach(i => { if (!p.tracks.some(t => t.index === i)) muted.delete(i); });
+
+  $('bpm').value = p.bpm;
+  $('info').innerHTML = p.errors.length
+    ? '<span style="color:#ff6b6b">✖ ' + p.errors.length + ' 个错误，已按能理解的部分预览</span>'
+    : '📄 <b>' + (p.title || '未命名') + '</b> · ' + p.tracks.length + ' 条轨道 · ' +
+      p.tracks.reduce((s, t) => s + t.notes.length, 0) + ' 个音符 · ' +
+      p.totalBeats + ' 拍 · ' + p.duration.toFixed(2) + ' s · ' + p.timeSig;
+
+  renderMessages(p);
+  renderTracks(p);
+  drawRoll();
+  updateClock(0);
+
+  if (showStatus) {
+    if (p.errors.length) setStatus('⚠ 有 ' + p.errors.length + ' 处语法问题，修正后即可试听', 'warn');
+    else if (!p.tracks.length) setStatus('⚠ 还没有可播放的音符', 'warn');
+    else setStatus('✅ 解析成功：' + p.tracks.length + ' 条轨道 / ' +
+                   p.tracks.reduce((s, t) => s + t.notes.length, 0) + ' 个音符', 'ok');
+  }
+  return p.errors.length === 0;
+}
+
+/* ============================================================
+   5. 钢琴卷帘 + 播放光标
+   ============================================================ */
+const roll = $('roll');
+const rctx = roll.getContext('2d');
+function fitRoll() {
+  const r = roll.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  roll.width = Math.max(320, r.width) * dpr;
+  roll.height = 250 * dpr;
+  rctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  drawRoll();
+}
+window.addEventListener('resize', fitRoll);
+
+function drawRoll() {
+  const W = roll.clientWidth, H = 250;
+  rctx.clearRect(0, 0, W, H);
+  const p = parsed;
+  if (!p || !p.tracks.length) {
+    rctx.fillStyle = '#4a5265'; rctx.font = '13px sans-serif';
+    rctx.fillText('左边写下音符，这里会显示乐谱图形', 14, 26);
+    return;
+  }
+  const all = p.tracks.flatMap(t => t.notes);
+  let lo = 127, hi = 0;
+  for (const n of all) { if (n.midi < lo) lo = n.midi; if (n.midi > hi) hi = n.midi; }
+  lo -= 1; hi += 1;
+  const span = Math.max(12, hi - lo);
+  const dur = Math.max(0.001, p.duration);
+  const beatW = (W - 2) / dur;
+  const trackH = H / p.tracks.length;
+
+  p.tracks.forEach((t, i) => {
+    const on = !muted.has(t.index);
+    const y0 = i * trackH;
+    rctx.fillStyle = i % 2 ? '#12151c' : '#141822';
+    rctx.fillRect(0, y0, W, trackH);
+    const nh = Math.max(2, trackH / span);
+    rctx.globalAlpha = on ? 1 : 0.28;
+    rctx.fillStyle = PALETTE[i % PALETTE.length];
+    for (const n of t.notes) {
+      const x = n.time * beatW + 1;
+      const w = Math.max(1.5, n.duration * beatW - 1);
+      const y = y0 + trackH - ((n.midi - lo + 1) / span) * trackH;
+      rctx.fillRect(x, y - nh / 2, w, nh);
+    }
+    rctx.globalAlpha = 1;
+  });
+
+  // 播放光标
+  if (playing || paused) {
+    const sec = Math.min(Tone.Transport.seconds, dur);
+    const x = sec * beatW + 1;
+    rctx.strokeStyle = '#ff6b6b'; rctx.lineWidth = 1.5;
+    rctx.beginPath(); rctx.moveTo(x, 0); rctx.lineTo(x, H); rctx.stroke();
+  }
+}
+
+function updateClock(sec) {
+  const d = parsed ? parsed.duration : 0;
+  $('clock').textContent = sec.toFixed(2) + ' / ' + d.toFixed(2) + ' s';
+}
+
+/* ============================================================
+   6. 播放控制
+   ============================================================ */
+let playing = false, paused = false, scheduled = false;
+
+function scheduleAll() {
+  Tone.Transport.cancel();
+  if (!parsed) return 0;
+  let n = 0;
+  for (const t of parsed.tracks) {
+    if (muted.has(t.index)) continue;
+    for (const note of t.notes) {
+      Tone.Transport.schedule((time) => {
+        synth.triggerAttackRelease(note.name, note.duration, time, note.velocity);
+      }, note.time);
+      n++;
+    }
+  }
+  if ($('chkClick').checked) {
+    const spb = 60 / parsed.bpm;
+    const beats = Math.ceil(parsed.totalBeats);
+    for (let b = 0; b <= beats; b++) {
+      const accent = b % Math.round(parsed.beatsPerBar) === 0;
+      Tone.Transport.schedule((time) => {
+        click.triggerAttackRelease(accent ? 'G5' : 'C5', 0.02, time);
+      }, b * spb);
+    }
+  }
+  Tone.Transport.loop = $('chkLoop').checked;
+  Tone.Transport.loopStart = 0;
+  Tone.Transport.loopEnd = Math.max(0.1, parsed.duration);
+  scheduled = true;
+  return n;
+}
+
+async function play() {
+  try { await initAudio(); } catch (e) { return fail('初始化音频', e); }
+  if (!reparse(true)) return;
+  if (!parsed.tracks.length) return;
+  if (muted.size >= parsed.tracks.length) return setStatus('⚠ 所有轨道都被静音了', 'warn');
+
+  if (!scheduled) {
+    const n = scheduleAll();
+    setStatus('▶ 正在试听（已排程 ' + n + ' 个音符）', 'ok');
+  }
+  Tone.Transport.start();
+  playing = true; paused = false;
+}
+
+function pause() {
+  if (!playing) return;
+  Tone.Transport.pause();
+  playing = false; paused = true;
+  setStatus('⏸ 已暂停', 'warn');
+}
+
+function stopAll(msg) {
+  if (Tone) {
+    Tone.Transport.stop();
+    Tone.Transport.cancel();
+    Tone.Transport.seconds = 0;
+    Tone.Transport.loop = false;
+  }
+  if (synth) synth.releaseAll();
+  playing = false; paused = false; scheduled = false;
+  updateClock(0);
+  drawRoll();
+  if (msg) setStatus(msg, 'warn');
+}
+
+/* 动画循环 */
+function tick() {
+  requestAnimationFrame(tick);
+  if (!parsed) return;
+  if (playing || paused) {
+    const sec = Tone.Transport.seconds;
+    updateClock(sec);
+    drawRoll();
+    if (playing && !Tone.Transport.loop && sec >= parsed.duration + 0.2) {
+      stopAll('✅ 播放结束');
+    }
+  }
+}
+
+/* ============================================================
+   7. 导出
+   ============================================================ */
+/** @tonejs/midi 写文本 meta 时按码点&0xFF 截断，中文会乱码。
+    这里把 UTF-8 字节伪装成 Latin-1 字符传进去，库就会写出正确的 UTF-8 字节。 */
+function toMidiText(s) {
+  const bytes = new TextEncoder().encode(s || '');
+  let out = '';
+  for (const b of bytes) out += String.fromCharCode(b);
+  return out;
+}
+
+function download(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.rel = 'noopener';
+  // 有些浏览器要求触发下载的 <a> 在文档里才生效，所以先挂上去再点
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 4000);
+}
+const safeName = (s) => (s || 'score').replace(/[\\/:*?"<>|]/g, '_');
+
+$('btnExportMid').onclick = () => {
+  try {
+    if (!reparse(true) || !parsed.tracks.length) return;
+    const midi = new MidiCtor();
+    midi.header.fromJSON({
+      name: toMidiText(parsed.title || 'untitled'),
+      ppq: 480,
+      tempos: [{ bpm: parsed.bpm, ticks: 0 }],
+      timeSignatures: [{ ticks: 0, timeSignature: parsed.timeSig.split('/').map(Number) }],
+      keySignatures: [], meta: []
+    });
+    parsed.tracks.forEach(t => {
+      const tr = midi.addTrack();       // 导出始终包含全部轨道（静音只影响试听）
+      tr.name = toMidiText(t.name);
+      t.notes.forEach(n => tr.addNote({
+        midi: n.midi, time: n.time, duration: n.duration, velocity: n.velocity
+      }));
+    });
+    const bytes = midi.toArray();
+    download(new Blob([bytes], { type: 'audio/midi' }), safeName(parsed.title) + '.mid');
+    setStatus('⬇ 已导出 MIDI（' + bytes.length + ' 字节），可用 MuseScore / DAW 打开', 'ok');
+  } catch (e) { fail('导出 MIDI', e); }
+};
+
+$('btnExportJson').onclick = () => {
+  try {
+    if (!reparse(true) || !parsed.tracks.length) return;
+    const midi = new MidiCtor();
+    midi.header.fromJSON({
+      name: parsed.title || 'untitled', ppq: 480,
+      tempos: [{ bpm: parsed.bpm, ticks: 0 }],
+      timeSignatures: [{ ticks: 0, timeSignature: parsed.timeSig.split('/').map(Number) }],
+      keySignatures: [], meta: []
+    });
+    parsed.tracks.forEach(t => {
+      const tr = midi.addTrack(); tr.name = t.name;
+      t.notes.forEach(n => tr.addNote({
+        midi: n.midi, time: n.time, duration: n.duration, velocity: n.velocity
+      }));
+    });
+    const json = JSON.stringify(midi.toJSON(), null, 2);
+    download(new Blob([json], { type: 'application/json' }), safeName(parsed.title) + '.midi.json');
+    setStatus('⬇ 已导出 JSON（可被「演奏页」重新载入）', 'ok');
+  } catch (e) { fail('导出 JSON', e); }
+};
+
+/* ---------- 导出 MP3：离线渲染 + LAME 编码 ---------- */
+let exporting = false;
+
+/** 用与实时试听相同的音色设置，把整首曲子离线渲染成 PCM */
+async function renderOffline() {
+  const tail = 2.6;                                  // 给混响留尾巴
+  const duration = Math.max(1, parsed.duration) + tail;
+  return await Tone.Offline(async () => {
+    let reverb = null;
+    try {
+      reverb = new Tone.Reverb({ decay: 2.0, preDelay: 0.01, wet: 0.16 }).toDestination();
+      // 混响的冲激响应是异步生成的；离线渲染必须等它就绪，否则会渲染成干声/静音
+      if (reverb.ready && typeof reverb.ready.then === 'function') await reverb.ready;
+    } catch (e) {
+      reverb = null;                                 // 拿不到混响就退化成干声，不影响导出
+    }
+    const s = new Tone.PolySynth(Tone.Synth, {
+      maxPolyphony: 64,
+      oscillator: { type: 'triangle' },
+      envelope: { attack: 0.012, decay: 0.18, sustain: 0.32, release: 1.0 }
+    });
+    s.set({ detune: 4 });
+    const filter = new Tone.Filter({ frequency: 5200, type: 'lowpass', rolloff: -12 });
+    s.connect(filter);
+    if (reverb) filter.connect(reverb); else filter.toDestination();
+    s.volume.value = -8;
+    // 离线渲染固定 44100Hz / 立体声；导出始终包含全部轨道（静音只影响试听）
+    for (const t of parsed.tracks) {
+      for (const n of t.notes) s.triggerAttackRelease(n.name, n.duration, n.time, n.velocity);
+    }
+  }, duration, 2, 44100);
+}
+
+function floatTo16(f32) {
+  const out = new Int16Array(f32.length);
+  for (let i = 0; i < f32.length; i++) {
+    const v = f32[i] < -1 ? -1 : (f32[i] > 1 ? 1 : f32[i]);
+    out[i] = v < 0 ? v * 0x8000 : v * 0x7fff;
+  }
+  return out;
+}
+
+/** 分块编码，块之间让出主线程，避免长曲子把页面卡死 */
+async function encodeMp3(audioBuffer, kbps, onProgress) {
+  if (typeof lamejs === 'undefined' || !lamejs.Mp3Encoder) {
+    throw new Error('MP3 编码器未加载（vendor/lame.min.js）');
+  }
+  const nch = audioBuffer.numberOfChannels;
+  const enc = new lamejs.Mp3Encoder(nch, audioBuffer.sampleRate, kbps);
+  const L = audioBuffer.getChannelData(0);
+  const R = nch > 1 ? audioBuffer.getChannelData(1) : null;
+  const BLOCK = 1152 * 24;
+  const parts = [];
+  for (let i = 0; i < L.length; i += BLOCK) {
+    const l = floatTo16(L.subarray(i, i + BLOCK));
+    const out = R ? enc.encodeBuffer(l, floatTo16(R.subarray(i, i + BLOCK)))
+                  : enc.encodeBuffer(l);
+    if (out.length) parts.push(new Int8Array(out));
+    if ((i / BLOCK) % 6 === 0) {
+      const pct = Math.round(i / L.length * 100);
+      setStatus('🎵 正在编码 MP3… ' + pct + '%', 'warn');
+      if (onProgress) onProgress(pct);
+      await new Promise(r => setTimeout(r, 0));
+    }
+  }
+  const end = enc.flush();
+  if (end.length) parts.push(new Int8Array(end));
+  return new Blob(parts, { type: 'audio/mpeg' });
+}
+
+$('btnExportMp3').onclick = async () => {
+  if (exporting) return;
+  const btn = $('btnExportMp3');
+  const orig = btn.textContent;
+  try {
+    if (!reparse(true) || !parsed.tracks.length) return;
+    exporting = true; btn.disabled = true;
+    stopAll();
+    btn.textContent = '🎵 渲染中…';
+    setStatus('🎵 正在离线渲染音频……（' + Math.round(parsed.duration) +
+              ' 秒的曲子，渲染+编码共约 30~60 秒，请勿关闭页面）', 'warn');
+    await new Promise(r => setTimeout(r, 60));      // 让状态先画出来
+
+    const t0 = performance.now();
+    const tb = await renderOffline();
+    const ab = (tb && typeof tb.get === 'function') ? tb.get() : tb;
+
+    // 先确认渲染出来的不是静音，否则导出的 mp3 会是哑的
+    const chk = ab.getChannelData(0);
+    let peak = 0;
+    for (let i = 0; i < chk.length; i += 53) peak = Math.max(peak, Math.abs(chk[i]));
+    if (peak < 0.001) {
+      throw new Error('离线渲染结果是静音，已中止（时长 ' + ab.duration.toFixed(1) + 's）');
+    }
+
+    btn.textContent = '🎵 编码 0%';
+    const blob = await encodeMp3(ab, 192, (pct) => { btn.textContent = '🎵 编码 ' + pct + '%'; });
+    const filename = safeName(parsed.title) + '.mp3';
+    download(blob, filename);
+    const take = ((performance.now() - t0) / 1000).toFixed(1);
+    setStatus('✅ 已导出 MP3：' + filename + '（' + (blob.size / 1048576).toFixed(2) +
+              ' MB · ' + ab.duration.toFixed(1) + ' 秒 · 192 kbps · 用时 ' + take +
+              ' 秒）\n下载完成后可按 Ctrl+J 查看——文件在浏览器的默认下载目录里。', 'ok');
+  } catch (e) {
+    fail('导出 MP3', e);
+  } finally {
+    exporting = false; btn.disabled = false; btn.textContent = orig;
+  }
+};
+
+/* ============================================================
+   8. 交互绑定
+   ============================================================ */
+let debounce = null;
+src.addEventListener('input', () => {
+  clearTimeout(debounce);
+  debounce = setTimeout(() => {
+    if (src.value === lastText) return;
+    lastText = src.value;
+    muted.clear();          // 改写了乐谱就恢复全部轨道可听，避免新轨道被静音而"没声音"
+    try { localStorage.setItem(STORE_KEY, src.value); } catch (e) {}
+    if (playing || paused) stopAll('乐谱已改动，播放已停止 — 再按「▶ 试听」');
+    scheduled = false;
+    reparse(true);
+  }, 350);
+});
+
+$('btnPlay').onclick = play;
+$('btnPause').onclick = pause;
+$('btnStop').onclick = () => { stopAll('■ 已停止'); };
+
+// 循环 / 节拍器 开关：重新排程（只在停止状态下有效，避免播放中途错乱）
+['chkLoop', 'chkClick'].forEach(id => {
+  $(id).onchange = () => {
+    scheduled = false;
+    if (playing || paused) stopAll('设置已改动，播放已停止 — 再按「▶ 试听」');
+  };
+});
+
+// BPM 输入：直接改写文本里的 bpm 指令，保持文本是唯一真实来源
+$('bpm').onchange = () => {
+  const v = Math.max(20, Math.min(300, Math.round(+$('bpm').value || 120)));
+  $('bpm').value = v;
+  const re = /^([ \t]*)bpm[ \t]+\S+[ \t]*$/im;
+  if (re.test(src.value)) src.value = src.value.replace(re, '$1bpm ' + v);
+  else src.value = 'bpm ' + v + '\n' + src.value;
+  scheduled = false;
+  if (playing || paused) stopAll('速度已改，播放已停止 — 再按「▶ 试听」');
+  lastText = src.value;
+  try { localStorage.setItem(STORE_KEY, src.value); } catch (e) {}
+  reparse(true);
+};
+
+$('btnOpen').onclick = () => {
+  // 打开新乐谱会替换当前内容（本地自动保存也会被覆盖），先确认一次，避免手滑丢失作品
+  if (src.value.trim() &&
+      !confirm('打开乐谱文件会替换当前编辑的内容。\n\n当前内容已自动保存在浏览器里，但现在会被覆盖——\n如果还想留着，请先点「⬇ 导出 .json」或复制文本。\n\n确定要继续吗？')) return;
+  $('openFile').click();
+};
+$('openFile').onchange = (e) => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const r = new FileReader();
+  r.onerror = () => fail('读取' + f.name, r.error);
+  r.onload = () => {
+    src.value = String(r.result);
+    lastText = src.value;
+    muted.clear();
+    try { localStorage.setItem(STORE_KEY, src.value); } catch (err) {}
+    scheduled = false;
+    stopAll();
+    reparse(true);
+    setStatus('📂 已载入《' + f.name.replace(/\.(txt|music|score)$/i, '') + '》 — 按「▶ 试听」', 'ok');
+    e.target.value = '';   // 清空，方便再次打开同一个文件
+  };
+  r.readAsText(f, 'utf-8');
+};
+
+$('btnLoadDemo').onclick = () => {
+  const keys = Object.keys(DEMOS);
+  const cur = $('btnLoadDemo').dataset.k || '';
+  const next = keys[(keys.indexOf(cur) + 1) % keys.length];
+  $('btnLoadDemo').dataset.k = next;
+  src.value = DEMOS[next].text;
+  $('btnLoadDemo').textContent = '载入示例：' + DEMOS[next].label;
+  lastText = src.value;
+  muted.clear();
+  try { localStorage.setItem(STORE_KEY, src.value); } catch (e) {}
+  scheduled = false;
+  stopAll();
+  reparse(true);
+};
+
+$('btnClear').onclick = () => {
+  if (!confirm('清空当前乐谱并重新开始？')) return;
+  src.value = '# 开始写你自己的曲子\n# 例如：C4 D4 E4 F4 | G4 A4 B4 C5 |\ntitle 新曲子\nbpm 120\n\n主旋律:\n  C4 D4 E4 F4 | G4 A4 B4 C5 |\n';
+  lastText = src.value;
+  muted.clear();
+  try { localStorage.setItem(STORE_KEY, src.value); } catch (e) {}
+  scheduled = false;
+  stopAll();
+  reparse(true);
+  src.focus();
+};
+
+window.addEventListener('error', (e) => fail('未捕获错误', e.message));
+
+/* ============================================================
+   9. 启动
+   ============================================================ */
+src.value = loadInitialText();
+lastText = src.value;
+$('btnLoadDemo').textContent = '载入示例';
+reparse(false);
+fitRoll();
+tick();
+setStatus('👋 点一下页面激活音频 → 改左边内容 → 按「▶ 试听」。（作品会自动保存在浏览器里）');
+</script>
+</body>
+</html>

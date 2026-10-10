@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>嵌入到你的网站 · Web 电子乐谱</title>
+<style>
+  :root{--bg:#12141a;--panel:#1b1e27;--line:#2c3140;--fg:#e8ecf4;--dim:#98a2b8;
+        --accent:#4da3ff;--ok:#3ddc97;--warn:#ffc857;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);padding:18px 20px 60px;
+       font:14px/1.7 "Segoe UI","Microsoft YaHei",system-ui,sans-serif}
+  h1{font-size:19px;margin:0 0 4px}
+  h2{font-size:14px;margin:0 0 10px;color:var(--accent);text-transform:uppercase;letter-spacing:.5px}
+  .sub{color:var(--dim);font-size:13px;margin:0 0 16px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+         padding:14px 16px;margin-bottom:14px}
+  .row{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+  button{background:#28303f;color:var(--fg);border:1px solid var(--line);border-radius:7px;
+         padding:7px 14px;font-size:13px;cursor:pointer}
+  button:hover{background:#333d4f;border-color:#465268}
+  button.on{background:var(--accent);border-color:var(--accent);color:#08131f;font-weight:600}
+  pre{background:#0e1016;border:1px solid var(--line);border-radius:8px;padding:12px 14px;
+      font:12.5px/1.7 Consolas,monospace;overflow:auto;margin:0;color:#9fd0ff;white-space:pre}
+  code{background:#0e1016;padding:1px 6px;border-radius:4px;font-family:Consolas,monospace;color:#8fd0ff}
+  iframe{width:100%;border:0;border-radius:12px;background:#000;display:block}
+  input[type=range]{accent-color:var(--accent);vertical-align:middle}
+  .mono{font-family:Consolas,monospace;font-size:12px;color:var(--dim)}
+  ul{margin:6px 0 0;padding-left:22px}
+  li{margin-bottom:5px}
+  .tip{border-left:3px solid var(--warn);background:#241f14;padding:8px 12px;border-radius:6px;margin-top:10px}
+</style>
+</head>
+<body>
+
+<h1>🔗 把乐谱工具嵌入你的网站</h1>
+<p class="sub">纯静态，不需要后端。把整个文件夹传到网站任意目录，然后粘贴一段 iframe 代码即可。</p>
+
+<div class="panel">
+  <h2>1 · 传到网站目录</h2>
+  <p style="margin:0 0 8px">用 <code>node build-dist.js</code> 打包出 <code>dist/</code>，把里面的文件原样上传，例如放到
+     <code>/music/</code>，最终变成：</p>
+  <pre id="tree"></pre>
+  <p class="mono" style="margin:8px 0 0">※ <code>vendor/</code> 和 <code>assets/</code> 是必需的子目录，别漏传或改名。</p>
+</div>
+
+<div class="panel">
+  <h2>2 · 复制嵌入代码</h2>
+  <div class="row" style="margin-bottom:10px">
+    <button id="btnEditor" class="on">乐谱工作台</button>
+    <button id="btnPlayer">演奏台</button>
+    <span class="mono" style="margin-left:8px">高度</span>
+    <input type="range" id="h" min="420" max="1400" step="20" value="900" style="width:180px">
+    <span class="mono" id="hLabel">900px</span>
+    <button id="btnCopy" style="margin-left:auto">📋 复制代码</button>
+  </div>
+  <pre id="snippet"></pre>
+  <div class="tip">
+    <b>路径要改成你自己的</b>：下面代码里的 <code>/music/</code> 请换成你实际上传的目录。
+    <code>allow="midi"</code> 是给真实 MIDI 键盘用的，不接 MIDI 键盘也可以留着。
+  </div>
+</div>
+
+<div class="panel">
+  <h2>3 · 实时预览（下面就是 iframe 里的真实效果）</h2>
+  <iframe id="preview" src="editor.html" allow="midi" title="Web 电子乐谱预览"></iframe>
+</div>
+
+<div class="panel">
+  <h2>4 · 几个要注意的点</h2>
+  <ul>
+    <li><b>必须用 iframe，不要用 <code>&lt;script&gt;</code> 引入</b>：页面里有完整的 HTML 结构和全局样式，
+        直接用脚本嵌进你的页面会互相污染样式。</li>
+    <li><b>声音需要用户点一下</b>：浏览器策略要求先有一次点击才能出声。页面已经写了提示，不用你额外处理。</li>
+    <li><b>Web MIDI 需要 HTTPS</b>：如果你的网站是 <code>https://</code>，接 MIDI 键盘没问题；
+        如果是 <code>http://</code>，浏览器会禁用 MIDI 接口，但键盘弹奏、MIDI 文件载入、自动演奏都不受影响。</li>
+    <li><b>代码里的跳转已经处理好了</b>：两个页面之间的链接带了 <code>target="_top"</code>，
+        在 iframe 里点击会跳到你的整个页面，不会嵌一层套一层。</li>
+    <li><b>数据存在访问者自己的浏览器里</b>（localStorage）：你写的曲子只存在你本机，
+        不会上传到任何服务器，别人也看不到。换电脑或清缓存会丢失，重要作品建议用「导出 .json / .mid」留档。</li>
+    <li><b>别人写不了你的谱</b>：这是纯前端工具，没有云端存储或账号系统。如果你以后想要"多设备同步"或"分享给他人"，
+        那才需要加后端。</li>
+  </ul>
+</div>
+
+<script>
+const PATHS = { editor: 'editor.html', player: 'index.html' };
+const LABELS = { editor: '乐谱工作台', player: '演奏台' };
+let current = 'editor';
+let height = 900;
+const DIR = '/music/';     // 示例路径，提示用户替换
+
+const $ = (id) => document.getElementById(id);
+
+function renderTree() {
+  $('tree').textContent =
+`/music/
+├── index.html        演奏台
+├── editor.html       乐谱工作台   ← 要嵌的就是这个
+├── embed.html        本说明页（可以不传）
+├── vendor/Tone.js
+├── vendor/Midi.js
+└── assets/demo.mid`;
+}
+
+function renderSnippet() {
+  $('snippet').textContent =
+`<iframe
+  src="${DIR}${PATHS[current]}"
+  style="width:100%;height:${height}px;border:0;border-radius:12px"
+  allow="midi"
+  title="Web 电子乐谱 · ${LABELS[current]}"></iframe>`;
+}
+
+function refresh() {
+  $('preview').src = PATHS[current];
+  $('preview').style.height = height + 'px';
+  $('hLabel').textContent = height + 'px';
+  $('btnEditor').className = current === 'editor' ? 'on' : '';
+  $('btnPlayer').className = current === 'player' ? 'on' : '';
+  renderSnippet();
+}
+
+$('btnEditor').onclick = () => { current = 'editor'; refresh(); };
+$('btnPlayer').onclick = () => { current = 'player'; refresh(); };
+$('h').oninput = (e) => { height = +e.target.value; refresh(); };
+$('btnCopy').onclick = async () => {
+  try {
+    await navigator.clipboard.writeText($('snippet').textContent);
+    $('btnCopy').textContent = '✔ 已复制';
+  } catch (e) {
+    // 剪贴板 API 在非 HTTPS 下不可用，退回选中文本
+    const r = document.createRange();
+    r.selectNodeContents($('snippet'));
+    const sel = getSelection();
+    sel.removeAllRanges(); sel.addRange(r);
+    $('btnCopy').textContent = '已选中，请按 Ctrl+C';
+  }
+  setTimeout(() => { $('btnCopy').textContent = '📋 复制代码'; }, 2000);
+};
+
+renderTree();
+refresh();
+</script>
+</body>
+</html>

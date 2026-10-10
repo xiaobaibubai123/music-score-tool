@@ -1,0 +1,16 @@
+# 统一换行符：仓库内一律 LF，检出时按平台
+* text=auto eol=lf
+
+# 二进制文件不要做换行转换
+*.mid binary
+*.midi binary
+*.mp3 binary
+*.png binary
+*.jpg binary
+*.ico binary
+
+# 让 GitHub 正确识别语言构成
+*.js    text
+*.py    text
+*.md    text
+*.html  text

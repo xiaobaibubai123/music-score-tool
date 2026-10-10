@@ -1,0 +1,31 @@
+# 依赖
+node_modules/
+
+# 打包产物
+dist/
+
+# 测试产生的临时文件
+tools/dl-*/
+tools/shot-*.png
+tools/*-report.txt
+tools/simple.json
+tools/broken.json
+tools/downloads/
+tools/node_modules/
+
+# 扒谱过程中下载的谱面图片（有版权，别提交）
+tools/transcribe/crops*/
+tools/transcribe/ref/
+tools/transcribe/zoom/
+
+# 自己的乐谱（想分享的话可以手动加白名单）
+scores/*
+!scores/README.md
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+*.log
