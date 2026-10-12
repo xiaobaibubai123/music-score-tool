@@ -1,5 +1,5 @@
 /**
- * 极简静态服务器 —— 用来跑 index.html / editor.html / embed.html
+ * 极简静态服务器 —— 用来跑乐谱工作台
  * 不需要 webpack，也不会有 TS 报错。
  *
  *   node serve.js                 # 默认发布本脚本所在目录（项目根），http://localhost:8081/
@@ -137,8 +137,6 @@ const server = http.createServer((req, res) => {
 
 server.listen(PORT, () => {
   console.log('发布目录     ' + ROOT);
-  console.log('乐谱工作台   http://localhost:' + PORT + '/editor.html');
-  console.log('乐器演奏台   http://localhost:' + PORT + '/');
-  console.log('嵌入说明     http://localhost:' + PORT + '/embed.html');
+  console.log('乐谱工作台   http://localhost:' + PORT + '/');
   console.log('(已开启 gzip/br 压缩 + 分级缓存；Ctrl+C 停止)');
 });

@@ -4,9 +4,8 @@
  *   node build-dist.js
  *
  * 产物结构（自包含，不依赖 node_modules，全部相对路径）：
- *   dist/index.html     演奏台
- *   dist/editor.html    乐谱工作台
- *   dist/vendor/*.js    Tone.js + @tonejs/midi（本地化）
+ *   dist/index.html     乐谱工作台（唯一页面）
+ *   dist/vendor/*.js    Tone.js + @tonejs/midi + lamejs（本地化）
  *   dist/assets/demo.mid 内置示例
  *
  * 上传 dist/ 里的【内容】到网站根目录即可；放在子目录（如 GitHub Pages 的 /repo/）也能用，
@@ -18,7 +17,7 @@ const path = require('path');
 const ROOT = __dirname;
 const DIST = path.join(ROOT, 'dist');
 
-const FILES = ['index.html', 'editor.html', 'embed.html'];
+const FILES = ['index.html'];
 const DIRS = ['vendor', 'assets'];
 
 function copyDir(from, to) {

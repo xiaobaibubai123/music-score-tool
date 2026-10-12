@@ -5,7 +5,7 @@ const { Midi } = require('@tonejs/midi');
 
 const CHROME = require('./chrome.js');
 const BASE = (process.env.BASE_URL || 'http://localhost:8081').replace(/\/+$/, '');
-const URL = BASE + '/editor.html';
+const URL = BASE + '/';
 const DL = path.join(__dirname, 'dl-editor');
 const results = [];
 
@@ -40,6 +40,8 @@ const info = (page) => page.$eval('#info', el => el.textContent);
   const consoleErrors = [], pageErrors = [], badReqs = [];
   page.on('console', m => { if (m.type() === 'error') consoleErrors.push(m.text()); });
   page.on('pageerror', e => pageErrors.push(e.message));
+  // 兜底：页面里任何确认框都自动确认，避免测试卡死（#btnOpen 有防误覆盖确认框）
+  page.on('dialog', d => d.accept().catch(() => {}));
   page.on('response', r => { if (r.status() >= 400) badReqs.push('HTTP ' + r.status() + ' ' + r.url()); });
 
   const cdp = await page.target().createCDPSession();
@@ -171,9 +173,7 @@ const info = (page) => page.$eval('#info', el => el.textContent);
   /* ---------- 📂 打开乐谱文件（载入测试夹具） ---------- */
   const songPath = path.join(__dirname, 'fixtures', '测试乐谱.txt');
   if (fs.existsSync(songPath)) {
-    // 「打开乐谱文件」有防误覆盖的确认框，测试里自动确认
-    const dialogHandler = (d) => d.accept();
-    page.on('dialog', dialogHandler);
+    // 确认框由上面注册的全局 dialog 处理器自动确认
     // 走真实路径：点按钮 -> 弹出文件选择器 -> 选文件
     const [chooser] = await Promise.all([
       page.waitForFileChooser({ timeout: 8000 }),
@@ -199,7 +199,6 @@ const info = (page) => page.$eval('#info', el => el.textContent);
     // 同名轨道续写：全曲应只有 2 条轨道（分 5 个乐段书写）
     check('分乐段书写仍只有 2 条轨道（同名轨道续写生效）', loaded.tracks === 2,
           loaded.tracks + ' 条轨道');
-    page.off('dialog', dialogHandler);
   } else {
     check('📂 打开乐谱文件能载入外部 .txt', false, '找不到 ' + songPath);
   }
@@ -264,30 +263,51 @@ time 4/4
   const persisted = await page.evaluate(() => document.getElementById('src').value);
   check('刷新后作品仍在（localStorage）', /保存测试/.test(persisted), persisted.split('\n')[0]);
 
-  /* ---------- 13. 两个页面互相跳转 ---------- */
+  /* ---------- 13. 打开 MIDI / JSON 并转成可编辑乐谱文本 ---------- */
   await page.goto(URL, { waitUntil: 'networkidle2' });
-  const linkToPlay = await page.$eval('nav a', a => a.getAttribute('href'));
-  check('工作台→演奏页 用相对路径（子目录部署也能跳）', linkToPlay === 'index.html', linkToPlay);
-  await page.click('nav a');
-  await page.waitForSelector('#piano', { timeout: 10000 });
-  check('工作台 → 演奏页 跳转正常', /(\/|index\.html)$/.test(page.url()), page.url());
-  const backHref = await page.$eval('.sub a', a => a.getAttribute('href'));
-  check('演奏页 → 工作台 用相对路径', backHref === 'editor.html', backHref);
+  // 页面重新加载后 window.confirm 的覆盖会失效；#btnOpen 有防误覆盖的确认框，
+  // 不处理就会把浏览器卡死（另外一个 dialog 兜底处理放在页面创建处）
+  await page.evaluate(() => { window.confirm = () => true; });
 
-  const studioOk = await page.evaluate(() => !!window.Tone && document.querySelectorAll('#piano .wkey').length === 21);
-  check('演奏页仍然正常', studioOk);
+  // 导入 .mid（仓库自带的示例 MIDI）
+  const demoSrc = path.join(__dirname, '..', 'assets', 'demo.mid');
+  const [midChooser] = await Promise.all([
+    page.waitForFileChooser({ timeout: 8000 }),
+    page.click('#btnOpen'),
+  ]);
+  await midChooser.accept([demoSrc]);
+  // 必须等状态里出现具体文件名：只匹配「转换出乐谱文本」会撞上上一次操作的残留状态（假通过）
+  await page.waitForFunction(
+    () => document.getElementById('status').textContent.includes('demo.mid'),
+    { timeout: 30000 });
+  const imported = await page.evaluate(() => ({
+    status: document.getElementById('status').textContent,
+    info: document.getElementById('info').textContent,
+    text: document.getElementById('src').value,
+    msgs: document.getElementById('msgs').textContent.trim(),
+  }));
+  check('.mid 文件能转成乐谱文本', /转换出乐谱文本/.test(imported.status), imported.status);
+  check('转换结果里有 barlines off 指令', /barlines off/.test(imported.text));
+  check('转换结果含和弦语法（MIDI 是多声部的）', /\[[A-G]/.test(imported.text));
+  check('转换出的乐谱能直接解析出音符', /\d+ 个音符/.test(imported.info), imported.info);
+  check('转换出的乐谱没有语法错误', /没有发现语法问题/.test(imported.msgs), imported.msgs.slice(0, 80));
 
-  // 把工作台导出的 JSON 导入演奏页
+  // 导入工作台自己导出的 .json（往返）
   if (jsonFile) {
-    const fh = await page.$('#file');
-    const prev = await page.$eval('#status', el => el.textContent);
-    await fh.uploadFile(jsonFile);
-    await page.waitForFunction((pv) => document.getElementById('status').textContent !== pv,
-      { timeout: 20000 }, prev);
-    const finfo = await page.$eval('#fileInfo', el => el.textContent);
-    check('工作台导出的 JSON 能被演奏页读入', /音符 10/.test(finfo) && /有效轨道 2/.test(finfo), finfo);
+    const [jsonChooser] = await Promise.all([
+      page.waitForFileChooser({ timeout: 8000 }),
+      page.click('#btnOpen'),
+    ]);
+    await jsonChooser.accept([jsonFile]);
+    await page.waitForFunction(
+      (n) => document.getElementById('status').textContent.includes(n),
+      { timeout: 30000 }, path.basename(jsonFile));
+    const back = await page.evaluate(() => document.getElementById('info').textContent);
+    // 注：往返后轨道数会变多（转换时按「时值」拆轨，因为和弦语法要求同和弦内时值一致），
+    // 但音符总数必须一致
+    check('.json 往返后音符数一致', /10 个音符/.test(back), back);
   } else {
-    check('工作台导出的 JSON 能被演奏页读入', false, '没有导出的 json');
+    check('.json 往返后音符数一致', false, '没有导出的 json');
   }
 
   /* ---------- 14. 无错误 ---------- */
@@ -302,4 +322,4 @@ time 4/4
   console.log('\n===== ' + (results.length - failed.length) + ' / ' + results.length + ' 通过 =====');
   failed.forEach(f => console.log('  ✗ ' + f.name + ' :: ' + f.detail));
   if (failed.length) process.exitCode = 1;
-})().catch(e => { console.error('HARNESS ERROR:', e); process.exitCode = 2; });
+})().catch(e => { console.error('HARNESS ERROR:', e); process.exit(2); });

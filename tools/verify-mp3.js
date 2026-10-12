@@ -1,13 +1,11 @@
 /**
- * 验证「导出 MP3」功能 —— 工作台 / 演奏台 两个页面都测。
+ * 验证「导出 MP3」功能。
  *   1. 能产出文件，体积合理
  *   2. 字节头是合法 MP3
  *   3. 浏览器能真实解码（decodeAudioData）：时长/声道正确
  *   4. 解出的波形不是静音（峰值、RMS 都要有）
  *
- *   node verify-mp3.js            # 两个页面都测
- *   node verify-mp3.js editor     # 只测工作台
- *   node verify-mp3.js player     # 只测演奏台
+ *   node verify-mp3.js
  */
 const puppeteer = require('puppeteer-core');
 const path = require('path');
@@ -27,9 +25,9 @@ function check(name, ok, detail) {
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 const PAGES = {
-  editor: {
-    label: '工作台 /editor.html',
-    url: BASE + '/editor.html',
+  workbench: {
+    label: '工作台 /',
+    url: BASE + '/',
     async load(page) {
       await page.evaluate(() => { window.confirm = () => true; });
       const [chooser] = await Promise.all([
@@ -39,17 +37,6 @@ const PAGES = {
       await chooser.accept([SONG_TXT]);
       await page.waitForFunction(() => /已载入/.test(document.getElementById('status').textContent),
         { timeout: 20000 });
-    },
-    expectedSeconds: 9.6,
-  },
-  player: {
-    label: '演奏台 /',
-    url: BASE + '/',
-    async load(page) {
-      const input = await page.$('#file');
-      await input.uploadFile(SONG_JSON);
-      await page.waitForFunction(() => /已解析/.test(document.getElementById('status').textContent),
-        { timeout: 25000 });
     },
     expectedSeconds: 9.6,
   },
@@ -159,4 +146,4 @@ async function runOne(browser, key) {
   console.log('\n===== ' + (results.length - failed.length) + ' / ' + results.length + ' 通过 =====');
   failed.forEach(f => console.log('  ✗ ' + f.name + ' :: ' + f.detail));
   if (failed.length) process.exitCode = 1;
-})().catch(e => { console.error('HARNESS ERROR:', e); process.exitCode = 2; });
+})().catch(e => { console.error('HARNESS ERROR:', e); process.exit(2); });

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 测量一次页面访问真正产生了多少网络传输量。
  * 用 CDP 的 Network 域逐个请求统计 encodedDataLength。
  */
@@ -6,7 +6,7 @@ const puppeteer = require('puppeteer-core');
 
 const CHROME = require('./chrome.js');
 const BASE = (process.env.BASE_URL || 'http://localhost:8081').replace(/\/+$/, '');
-const PAGES = ['/', '/editor.html'];
+const PAGES = ['/'];
 
 async function measure(browser, url, { clearCache }) {
   const page = await browser.newPage();
