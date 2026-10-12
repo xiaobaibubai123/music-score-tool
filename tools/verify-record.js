@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 演奏录音页（record.html）端到端测试。
  *
  * 单元测试只证明"给定一串按键时间，能算出正确乐谱"。
@@ -40,16 +40,18 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const shape = await page.evaluate(() => {
     const p = document.getElementById('piano');
     const midis = Array.prototype.map.call(p.querySelectorAll('.key'), (e) => +e.dataset.midi);
+    const w = document.querySelector('.key.white');
     return {
       keys: midis.length,
       white: p.querySelectorAll('.key.white').length,
       black: p.querySelectorAll('.key.black').length,
       firstMidi: Math.min.apply(null, midis),
       lastMidi: Math.max.apply(null, midis),
+      keyW: w ? Math.round(w.getBoundingClientRect().width) : 0,
       kb: p.querySelectorAll('.key.kb').length,
       tags: Array.prototype.map.call(p.querySelectorAll('.key.kb .tag'), (e) => e.textContent).join(''),
-      hasOctBtns: !!document.getElementById('octUp') || !!document.getElementById('octDown'),
-      scrollable: p.scrollWidth > p.clientWidth + 1,
+      reg: document.getElementById('kbRange').textContent,
+      hasOctBtns: !!document.getElementById('octUp') && !!document.getElementById('octDown'),
       grids: Array.prototype.map.call(document.getElementById('grid').options, (o) => o.value),
       btns: ['btnStart', 'btnPause', 'btnResume', 'btnEnd'].map((id) => document.getElementById(id).textContent.trim()),
       startEnabled: !document.getElementById('btnStart').disabled,
@@ -61,13 +63,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       presets: document.getElementById('kmPreset').options.length,
     };
   });
-  check('整台钢琴都在一屏里（A0–C8，88 键 / 52 白 / 36 黑）',
-        shape.keys === 88 && shape.white === 52 && shape.black === 36 &&
-        shape.firstMidi === 21 && shape.lastMidi === 108,
+  check('钢琴只显示一组（C4–C5，13 键 / 8 白 / 5 黑），不是整台 88 键',
+        shape.keys === 13 && shape.white === 8 && shape.black === 5 &&
+        shape.firstMidi === 60 && shape.lastMidi === 72,
         '共 ' + shape.keys + ' 键 / 白 ' + shape.white + ' / 黑 ' + shape.black +
         ' / ' + shape.firstMidi + '–' + shape.lastMidi);
-  check('没有"升八度 / 降八度"这种会把琴键挪走的按钮',
-        !shape.hasOctBtns, shape.hasOctBtns ? '按钮还在' : '已移除');
+  check('一组琴键够宽，点得准（每根白键 ≥ 44px）', shape.keyW >= 44, shape.keyW + 'px');
+  check('有 ◀ 降一组 / 升一组 ▶ 两个按钮', shape.hasOctBtns);
+  check('明确标出当前是哪个音区', /当前音区/.test(shape.reg) && /C4 组/.test(shape.reg) &&
+        /小字一组/.test(shape.reg), JSON.stringify(shape.reg));
   check('四个控制键都在（开始 / 暂停 / 继续 / 结束）',
         shape.btns.length === 4 && /开始/.test(shape.btns[0]) && /暂停/.test(shape.btns[1]) &&
         /继续/.test(shape.btns[2]) && /结束/.test(shape.btns[3]), shape.btns.join(' | '));
@@ -75,26 +79,28 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check('量化网格 1/4、1/8、1/16、1/32 都有',
         shape.grids.join(',') === '1/4,1/8,1/16,1/32', shape.grids.join(','));
   check('琴键上直接标出"按哪个键"（A S D F …）',
-        shape.kb === 18 && /A/.test(shape.tags) && /S/.test(shape.tags) && /D/.test(shape.tags),
+        shape.kb === 13 && /A/.test(shape.tags) && /S/.test(shape.tags) && /D/.test(shape.tags),
         shape.kb + ' 个键有标记：' + shape.tags);
-  check('键位表在页面上是可编辑的（18 行）', shape.rows === 18, shape.rows + ' 行');
+  check('键位表在页面上是可编辑的（13 行）', shape.rows === 13, shape.rows + ' 行');
 
   /* ---------- 1.5 默认键位 = 通用"键盘钢琴"主键区 ---------- */
   const D = await page.evaluate(() => ({
     A: keyToMidi.KeyA, S: keyToMidi.KeyS, D: keyToMidi.KeyD, F: keyToMidi.KeyF,
     H: keyToMidi.KeyH, J: keyToMidi.KeyJ, K: keyToMidi.KeyK,
-    W: keyToMidi.KeyW, E: keyToMidi.KeyE, semicolon: keyToMidi.Semicolon,
-    z: keyToMidi.KeyZ,
+    W: keyToMidi.KeyW, E: keyToMidi.KeyE, U: keyToMidi.KeyU,
+    z: keyToMidi.KeyZ, l: keyToMidi.KeyL,
     binds: keymap.binds.length,
     presetCount: document.getElementById('kmPreset').options.length,
   }));
-  check('默认是"键盘主键区"：A S D F G H J K L ; 就是 do re mi fa sol la si do re mi',
+  check('默认是"键盘主键区"：A S D F G H J K 就是 do re mi fa sol la si do',
         D.A === 60 && D.S === 62 && D.D === 64 && D.F === 65 && D.H === 69 &&
-        D.J === 71 && D.K === 72 && D.semicolon === 76,
-        'A=' + D.A + ' S=' + D.S + ' D=' + D.D + ' F=' + D.F + ' H=' + D.H + ' J=' + D.J + ' K=' + D.K + ' ;=' + D.semicolon);
-  check('白键上一排就是黑键（W E → C#4 D#4）', D.W === 61 && D.E === 63, 'W=' + D.W + ' E=' + D.E);
-  check('Z 不再是"换八度"，也不占音符（没有运行时移调）', D.z == null, 'Z=' + D.z);
-  check('内置了多个预设可选', D.presetCount >= 3, D.presetCount + ' 个预设');
+        D.J === 71 && D.K === 72,
+        'A=' + D.A + ' S=' + D.S + ' D=' + D.D + ' F=' + D.F + ' H=' + D.H + ' J=' + D.J + ' K=' + D.K);
+  check('白键上一排就是黑键（W E U → C#4 D#4 A#4）',
+        D.W === 61 && D.E === 63 && D.U === 70, 'W=' + D.W + ' E=' + D.E + ' U=' + D.U);
+  check('默认就是"一组 13 个键"，不越界到下一组',
+        D.binds === 13 && D.l == null && D.z == null, '共 ' + D.binds + ' 键');
+  check('内置了多个预设可选', D.presetCount >= 4, D.presetCount + ' 个选项');
 
   /* ---------- 2. 和乐谱工作台共用同一份音源 ---------- */
   const shared = await page.evaluate(() => ({
@@ -156,11 +162,29 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check('松手后琴键熄灭', !released.on && released.pressed === 0, JSON.stringify(released));
 
   /* ---------- 4.5 在页面上直接改键位 ---------- */
-  // 钢琴不会被"挪走"：按下键前后，整台琴的 DOM 位置一模一样
+  // 换组：◀ ▶ 把整张键位表整体移调一个八度，琴键和标签一起走
+  const octUp = await page.evaluate(() => {
+    document.getElementById('octUp').click();
+    return { lo: +document.querySelector('.key').dataset.midi,
+             keys: document.querySelectorAll('.key').length,
+             a: keyToMidi.KeyA, reg: document.getElementById('kbRange').textContent };
+  });
+  check('点「升一组 ▶」：琴键、发声、音区标签一起升一个八度',
+        octUp.a === 72 && octUp.lo === 72 && octUp.keys === 13 &&
+        /C5 组/.test(octUp.reg) && /小字二组/.test(octUp.reg),
+        JSON.stringify(octUp));
+  const octDown = await page.evaluate(() => {
+    document.getElementById('octDown').click();
+    return { a: keyToMidi.KeyA, reg: document.getElementById('kbRange').textContent };
+  });
+  check('点「◀ 降一组」能回到原音区', octDown.a === 60 && /C4 组/.test(octDown.reg),
+        JSON.stringify(octDown));
+
+  // 钢琴不会被"重画成另一个样子"：按琴键前后 DOM 不变
   const before = await page.evaluate(() => document.getElementById('piano').innerHTML.length);
   await page.keyboard.down('KeyD'); await page.keyboard.up('KeyD');
   const after = await page.evaluate(() => document.getElementById('piano').innerHTML.length);
-  check('按键不会让钢琴重画/位移（整台琴始终在那儿）', before === after, before + ' → ' + after);
+  check('按键不会让钢琴重画/位移', before === after, before + ' → ' + after);
 
   // 点表格里 C4 那一行的按键，再按 Q —— 应该改绑到 Q，A 随之空出来
   await page.evaluate(() => {
@@ -185,7 +209,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check('点行里的按键 → 按一个键 → 立刻改绑',
         edited.capturing && /请按一个键/.test(edited.label) &&
         afterEdit.c4 === 60 && afterEdit.a == null && afterEdit.csharp4 === 61 &&
-        afterEdit.binds === 18 && afterEdit.conflicts === 0,
+        afterEdit.binds === 13 && afterEdit.conflicts === 0,
         JSON.stringify({ edited, afterEdit }));
   check('录键位时按下的键不会顺便弹出一个音', afterEdit.pressed === 0, '按住的音数 ' + afterEdit.pressed);
   check('页面上改的键位也会存下来', afterEdit.saved);
@@ -203,7 +227,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     conflicts: window.ScoreKeymap.conflicts(keymap).length,
   }));
   check('抢一个已被占用的键，会把它从旧主人身上摘掉（不留下冲突）',
-        steal.c4 === 60 && !steal.hasCsharp && steal.binds === 17 && steal.conflicts === 0,
+        steal.c4 === 60 && !steal.hasCsharp && steal.binds === 12 && steal.conflicts === 0,
         JSON.stringify(steal));
 
   // 删掉一条
@@ -214,7 +238,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     return { binds: keymap.binds.length, hasC4: keymap.binds.some((b) => b.midi === 60),
              rows: document.querySelectorAll('#kmTable tbody tr').length };
   });
-  check('点 ✕ 能删掉一条绑定', del.binds === 16 && !del.hasC4 && del.rows === 16, JSON.stringify(del));
+  check('点 ✕ 能删掉一条绑定', del.binds === 11 && !del.hasC4 && del.rows === 11, JSON.stringify(del));
 
   /* ---------- 4.6 冲突要标红 ---------- */
   const conflictUI = await page.evaluate(() => {

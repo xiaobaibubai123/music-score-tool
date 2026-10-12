@@ -48,9 +48,12 @@
   .row{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:8px}
   /* ---------- 钢琴 ---------- */
   .pianowrap{overflow-x:auto;padding:0 0 6px}
-  .piano{position:relative;height:176px;min-width:1180px;background:#0e1016;
+  .piano{position:relative;height:190px;background:#0e1016;
          border:1px solid var(--line);border-radius:8px;touch-action:none;user-select:none;
-         -webkit-user-select:none}
+         -webkit-user-select:none;margin:0 auto;max-width:100%}
+  .regbadge{display:inline-block;background:#12304d;border:1px solid #2f6ea8;color:#cfe6ff;
+            border-radius:7px;padding:6px 12px;font:13px Consolas,monospace;font-weight:600}
+  .regbadge small{color:#8fb6dd;font-weight:400;margin-left:6px}
   .key{position:absolute;top:0;cursor:pointer}
   .key.white{height:100%;background:linear-gradient(#ffffff,#e4e8f0);
              border:1px solid #b9c0cf;border-radius:0 0 5px 5px;z-index:1}
@@ -61,10 +64,10 @@
   .key.black.on{background:linear-gradient(#5fb0ff,#1d5f9e)}
   .key.black.kb{border-bottom:4px solid var(--accent)}
   .key span{position:absolute;left:0;width:100%;text-align:center;pointer-events:none;
-            font:9px Consolas,monospace;color:#7d879b;overflow:hidden;white-space:nowrap}
-  .key .nm{bottom:3px}                                    /* 音名 C1 C2 … 只标在 C 上 */
-  .key .tag{top:7px;font-size:10px;font-weight:700;color:#2f6ea8}   /* 键盘上按哪个键 */
-  .key.black .tag{top:5px;font-size:9px;color:#8fc4f5}
+            font:11px Consolas,monospace;color:#7d879b;overflow:hidden;white-space:nowrap}
+  .key .nm{bottom:5px}                                    /* 音名 C4 C5 … 只标在 C 上 */
+  .key .tag{top:12px;font-size:15px;font-weight:700;color:#2f6ea8}  /* 键盘上按哪个键 */
+  .key.black .tag{top:8px;font-size:12px;color:#8fc4f5}
   .key.black .nm{color:#9aa5bb}
   .key.white.kb .nm{color:#3f6d9e}
   #roll{width:100%;height:220px;background:#0e1016;border:1px solid var(--line);
@@ -153,14 +156,16 @@
   <div class="mono" id="recInfo" style="margin-top:10px"><span class="dot"></span>待机</div>
 </div>
 
-<!-- ============ 2 · 钢琴（整台，88 键，不移动） ============ -->
+<!-- ============ 2 · 钢琴（一组键，可升降） ============ -->
 <div class="panel">
   <h2>2 · 弹吧（鼠标点 / 键盘敲 / 手机上直接按）</h2>
-  <div class="pianowrap"><div id="piano" class="piano"></div></div>
-  <div class="row">
+  <div class="row" style="margin:0 0 8px">
+    <button id="octDown">◀ 降一组</button>
+    <button id="octUp">升一组 ▶</button>
+    <span class="regbadge" id="kbRange">—</span>
     <button id="btnPanic">✋ 全部松开</button>
-    <span class="mono" id="kbInfo"></span>
   </div>
+  <div class="pianowrap"><div id="piano" class="piano"></div></div>
   <div class="hint" id="kbHint"></div>
 </div>
 
@@ -181,8 +186,6 @@
     <select id="kmNoteSel"></select>
     <span class="mono">分配按键</span>
     <button class="primary" id="btnKmBind">🎯 点这里，再按一个键</button>
-    <button id="btnKmUp">整组 ↑ 八度</button>
-    <button id="btnKmDown">整组 ↓ 八度</button>
     <span class="mono" id="kmCount"></span>
   </div>
   <div class="mono" id="kmDesc" style="margin-top:8px;color:#7d879b"></div>
@@ -192,6 +195,8 @@
     一个音配一个键，直接在表格里改：点某一行的<b>按键</b>就能重新录一个键（按 <kbd>Esc</kbd> 取消），
     点<b>✕</b>删掉这条。<strong>同一个键绑给两个音会标红</strong> —— 那样按下去只会响其中一个，
     照着红字提示改掉就行。<br>
+    想换音区按上面的 <b>◀ 升 / 降一组 ▶</b>：那是把整张键位表整体移调一个八度
+    （琴键、发声、导出的 JSON 三边始终一致，不会出现"看着是 C4 弹出来是 C5"）。<br>
     <b>JSON 的写法是"音符当 key、按键当 value"</b>，仓库根目录的 <code>keymap.json</code> 改完刷新即生效：
     <code>{"notes": {"C4": "KeyA", "D4": "KeyS"}}</code>。
     按键要写 <code>KeyboardEvent.code</code>（<code>KeyA</code> / <code>Digit1</code> / <code>Semicolon</code> / <code>ArrowLeft</code>），
@@ -316,9 +321,9 @@ function rebuildKeyIndex() {
 function applyKeymap(map, opts) {
   keymap = map;
   rebuildKeyIndex();
-  paintKbBand();
+  buildPiano();                       // 一组琴键重建代价很小，顺带保证"显示 = 实际"
   renderKeymapPanel();
-  $('kbInfo').textContent = kbBandText();
+  renderRegister();
   if (!opts || !opts.keepStatus) {
     const c = Keymap.conflicts(keymap).length;
     setStatus('⌨ 键位已换成「' + keymap.name + '」' +
@@ -386,16 +391,19 @@ function releaseAll() {
 
 let lastNoteTimer = null;
 function updateLastNote(midi) {
-  const el = $('kbInfo');
-  el.textContent = kbBandText() + ' · 刚弹 ' + midiName(midi);
+  $('kbRange').innerHTML = registerHTML() + '<small>刚弹 ' + midiName(midi) + '</small>';
   clearTimeout(lastNoteTimer);
-  lastNoteTimer = setTimeout(() => { el.textContent = kbBandText(); }, 1200);
+  lastNoteTimer = setTimeout(() => { renderRegister(); }, 1200);
 }
-function kbBandText() {
-  const r = Keymap.range(keymap);
-  return '键盘覆盖 ' + midiName(r.lo) + ' – ' + midiName(r.hi) +
-         '（' + keymap.binds.length + ' 个键，琴键上有字母的就是）';
+/** 「当前音区 C4 组 · 小字一组」—— 用户要一眼知道自己弹的是哪个音调 */
+function registerHTML() {
+  const r = pianoRange();
+  const nm = (r.octaves <= 1) ? midiName(r.lo) + ' 组' : midiName(r.lo) + ' – ' + midiName(r.hi - 1);
+  const cn = (r.octaves <= 1) ? Keymap.groupName(r.lo)
+                              : r.octaves + ' 组（' + Keymap.groupName(r.lo) + '起）';
+  return '当前音区 ' + nm + '<small>' + cn + '</small>';
 }
+function renderRegister() { $('kbRange').innerHTML = registerHTML(); }
 
 /* ============================================================
    4. 电脑键盘：键位表说了算
@@ -430,46 +438,57 @@ window.addEventListener('keyup', (e) => {
 window.addEventListener('blur', () => releaseAll());
 
 /* ============================================================
-   5. 钢琴键盘：整台 88 键（A0–C8），一屏之内，不移动
+   5. 钢琴键盘：一次只画"一组"（C 到下一个 C），用 ◀ ▶ 升降换组
    ------------------------------------------------------------
-   以前是 C2–C7 的一小段，换八度还要"挪"一下 —— 现在整台琴都在，
-   键位表覆盖到的音在琴键上直接写字母，按哪个键一目了然。 */
-const PIANO_LO = 21, PIANO_HI = 108;                 // A0 ~ C8
+   一组 = 8 白 + 5 黑 = 13 个键，键够宽、点得准。
+   升/降不是"把琴挪一挪"，而是把整张键位表整体移调一个八度 ——
+   琴键、发声、导出的 JSON 三边始终一致。
+   ============================================================ */
 const BLACK = [1, 3, 6, 8, 10];
 const isBlack = (m) => BLACK.indexOf(((m % 12) + 12) % 12) >= 0;
+
+function pianoRange() { return Keymap.groupRange(keymap); }
+
+/** 白键宽度跟着可用宽度走：一组键就撑满、多组就缩小，两边都能点得准 */
+function whiteWidth(whiteCount) {
+  const host = $('piano');
+  const avail = Math.max(320, (host.parentElement ? host.parentElement.clientWidth : 800) - 2);
+  return Math.max(44, Math.min(96, Math.floor(avail / whiteCount)));
+}
 
 function buildPiano() {
   const host = $('piano');
   host.innerHTML = '';
+  const r = pianoRange();
   const whites = [];
-  for (let m = PIANO_LO; m <= PIANO_HI; m++) if (!isBlack(m)) whites.push(m);
-  const unit = 100 / whites.length;
-  const bw = unit * 0.62;
+  for (let m = r.lo; m <= r.hi; m++) if (!isBlack(m)) whites.push(m);
+  const WW = whiteWidth(whites.length);
+  host.style.width = (whites.length * WW) + 'px';
   whites.forEach((m, i) => {
     const el = document.createElement('div');
     el.className = 'key white';
     el.dataset.midi = m;
-    el.style.left = (i * unit) + '%';
-    el.style.width = unit + '%';
+    el.style.left = (i * WW) + 'px';
+    el.style.width = WW + 'px';
     if (m % 12 === 0) el.innerHTML = '<span class="nm">' + midiName(m) + '</span>';
     host.appendChild(el);
   });
-  for (let m = PIANO_LO; m <= PIANO_HI; m++) {
+  for (let m = r.lo; m <= r.hi; m++) {
     if (!isBlack(m)) continue;
     const i = whites.indexOf(m - 1);                 // 黑键永远夹在两个白键之间
     if (i < 0) continue;
     const el = document.createElement('div');
     el.className = 'key black';
     el.dataset.midi = m;
-    el.style.left = ((i + 1) * unit - bw / 2) + '%';
-    el.style.width = bw + '%';
+    el.style.left = ((i + 1) * WW - WW * 0.31) + 'px';
+    el.style.width = (WW * 0.62) + 'px';
     host.appendChild(el);
   }
   paintKbBand();
 }
 
 /** 把键位表画到琴键上：绑了的音加蓝线 + 按键字母。
- *  只有真的绑了键的音才标 —— 一眼就能看出"键盘能弹到哪几个音"。 */
+ *  只有真的绑了键的音才标 —— 一眼就能看出"这些键就是你现在能弹的音"。 */
 function paintKbBand() {
   $('piano').querySelectorAll('.key').forEach((el) => {
     const m = +el.dataset.midi;
@@ -480,6 +499,23 @@ function paintKbBand() {
     if (!tag) { tag = document.createElement('span'); tag.className = 'tag'; el.appendChild(tag); }
     tag.textContent = Keymap.labelOf(code);
   });
+}
+
+/** 升 / 降一组：整张键位表移调 ±12（真的改每一条，不是隐藏的偏移） */
+function shiftGroup(dir) {
+  const next = Keymap.transpose(keymap, dir * 12);
+  if (next === keymap || !next.binds.length) { setStatus('⚠ 已经到头了，再' + (dir > 0 ? '升' : '降') + '就跑出钢琴音域了', 'warn'); return; }
+  releaseAll();
+  afterEdit(next, (dir > 0 ? '升' : '降') + '了一组 —— 现在是 ' + rangeText());
+}
+
+/** 「当前音区 C4 组 · 小字一组」这句话 —— 用户要知道自己弹的是哪个音调 */
+function rangeText() {
+  const r = pianoRange();
+  const a = midiName(r.lo), b = midiName(r.hi);
+  if (r.octaves <= 1) return a + ' 组 · ' + Keymap.groupName(r.lo);
+  return a + ' – ' + midiName(r.hi - 1) + '（' + r.octaves + ' 组 · ' +
+         Keymap.groupName(r.lo) + '起）';
 }
 
 function midiAt(e) {
@@ -516,6 +552,8 @@ function midiAt(e) {
   host.addEventListener('pointerup', up);
   host.addEventListener('pointercancel', up);
   host.addEventListener('lostpointercapture', up);
+  $('octDown').onclick = () => shiftGroup(-1);
+  $('octUp').onclick = () => shiftGroup(1);
   $('btnPanic').onclick = () => { releaseAll(); setStatus('✋ 已松开所有音'); };
 })();
 
@@ -927,9 +965,11 @@ function kbHintHTML() {
     (isBlack(b.midi) ? black : white).push(Keymap.labelOf(b.code));
   });
   const tag = (arr) => arr.map((x) => '<kbd>' + x + '</kbd>').join('');
+  const r = pianoRange();
   return '白键：' + tag(white) + '<br>黑键：' + tag(black) +
     '<br>按住的时间越长，音就越长；想弹和弦就同时按几个键。' +
-    '<br>整台钢琴（A0–C8）都在屏幕上，鼠标可以点任何一个音；键盘弹的是上面这些标了字母的键。';
+    '<br>钢琴一次只显示一组（' + midiName(r.lo) + '–' + midiName(r.hi) +
+    '），要别的音区按上面的 <b>◀ 降一组 / 升一组 ▶</b>。';
 }
 
 /* ---------- 改键位 ---------- */
@@ -1035,14 +1075,14 @@ async function loadKeymapFile() {
                     description: saved.map.description || '',
                     binds: Keymap.sortBinds(binds), warnings: [],
                     custom: true, presetId: saved.presetId || '' }, { keepStatus: true });
-      $('kbInfo').textContent = kbBandText();
+      renderRegister();
       setStatus('⌨ 已载入你改过的键位「' + keymap.name + '」（想回到内置的按「↺ 恢复默认」）');
       return;
     }
   }
   const fromFile = await loadKeymapFile();
   if (fromFile) {
-    $('kbInfo').textContent = kbBandText();
+    renderRegister();
     setStatus('👋 键位来自 keymap.json：' + keymap.name + '。按「⏺ 开始录音」→ 弹 → 「⏹ 结束生成乐谱」。');
     return;
   }
@@ -1054,7 +1094,7 @@ async function loadKeymapFile() {
       applyKeymap(m, { keepStatus: true });
     }
   }
-  $('kbInfo').textContent = kbBandText();
+  renderRegister();
   renderKeymapPanel();
 })();
 
@@ -1090,8 +1130,6 @@ async function loadKeymapFile() {
   });
   $('btnKmBind').onclick = () => bindNewNote();
 
-  $('btnKmUp').onclick = () => afterEdit(Keymap.transpose(keymap, 12), '整组升了一个八度');
-  $('btnKmDown').onclick = () => afterEdit(Keymap.transpose(keymap, -12), '整组降了一个八度');
 
   $('btnKmLoad').onclick = () => $('kmFile').click();
   $('kmFile').addEventListener('change', () => {
@@ -1175,7 +1213,7 @@ $('out').addEventListener('input', () => renderCheck($('out').value));
   });
 });
 $('chkHands').addEventListener('change', () => { $('splitMidi').disabled = !$('chkHands').checked; });
-window.addEventListener('resize', fitRoll);
+window.addEventListener('resize', () => { fitRoll(); buildPiano(); });
 window.addEventListener('error', (e) => fail('未捕获错误', e.message));
 
 /* 下拉框选项 */
@@ -1204,7 +1242,7 @@ updateStats();
 setButtons();
 renderCheck(null);
 renderKeymapPanel();
-$('kbInfo').textContent = kbBandText();
+renderRegister();
 tick();
 setStatus('👋 按「⏺ 开始录音」→ 弹 → 按「⏹ 结束并生成乐谱」。也可以先敲 A / S / D 听听琴声。');
 </script>

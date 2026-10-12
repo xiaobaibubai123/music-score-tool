@@ -91,15 +91,14 @@
      内置预设（音符 → 按键）
      ============================================================ */
 
-  /** ① 键盘钢琴（通用主键区）—— 各类"在线钢琴"最常见的排法 */
+  /** ① 键盘钢琴（通用主键区）—— 各类"在线钢琴"最常见的排法，正好一组（C4–C5，13 个键） */
   const HOME_ROW = {
     name: '键盘钢琴（通用主键区）',
-    description: '在线钢琴最常见的排法：主键区当白键，上一排当黑键',
+    description: '在线钢琴最常见的排法：A S D F G H J K 是 do re mi fa sol la si do，上一排 W E T Y U 是黑键，正好一组',
     notes: {
       'C4': 'KeyA', 'C#4': 'KeyW', 'D4': 'KeyS', 'D#4': 'KeyE', 'E4': 'KeyD',
       'F4': 'KeyF', 'F#4': 'KeyT', 'G4': 'KeyG', 'G#4': 'KeyY', 'A4': 'KeyH',
-      'A#4': 'KeyU', 'B4': 'KeyJ', 'C5': 'KeyK', 'C#5': 'KeyO', 'D5': 'KeyL',
-      'D#5': 'KeyP', 'E5': 'Semicolon', 'F5': 'Quote'
+      'A#4': 'KeyU', 'B4': 'KeyJ', 'C5': 'KeyK'
     }
   };
 
@@ -300,6 +299,32 @@
     return { lo: Math.min.apply(null, ms), hi: Math.max.apply(null, ms) };
   }
 
+  /** 整组的显示范围：从最低音所在的"这一组"的 do，一直到最高音所在组再往上一个 do。
+   *  C4–C5 → C4…C5（一组 13 个键）；C3–B4 → C3…C5（两组）。永远按整组显示，
+   *  不会出现"半组"的琴键，也不会像 88 键那样挤成一条线。 */
+  function groupRange(map, bounds) {
+    const b = bounds || { lo: LO_MIDI, hi: HI_MIDI };
+    const r = range(map);
+    // 最低音往下取整到一个 do，最高音往上取整到一个 do。
+    // ⚠ 最高音本身就是 do 时不能再往上加一组：C4–C5 应该正好是"一组"（60–72），
+    //   写成 (floor(hi/12)+1)*12 会变成 C4–C6 两组（真踩过）。
+    let lo = Math.floor(r.lo / 12) * 12;
+    let hi = Math.ceil(r.hi / 12) * 12;
+    if (hi <= lo) hi = lo + 12;
+    lo = Math.max(b.lo, lo);
+    hi = Math.min(b.hi, hi);
+    if (hi <= lo) lo = Math.max(b.lo, hi - 12);
+    return { lo, hi, octaves: Math.max(1, Math.round((hi - lo) / 12)) };
+  }
+
+  /** 这一组在中文乐理里叫什么：C4 = 小字一组，C3 = 小字组，C2 = 大字组 … */
+  const CN_GROUP = { 0: '大字二组', 1: '大字一组', 2: '大字组', 3: '小字组',
+                     4: '小字一组', 5: '小字二组', 6: '小字三组', 7: '小字四组', 8: '小字五组' };
+  function groupName(midi) {
+    const oct = Math.floor(midi / 12) - 1;
+    return CN_GROUP[oct] || ('第 ' + oct + ' 组');
+  }
+
   /** 整组移调（页面上的「整组 ↑/↓ 八度」就是直接改每一条，不是运行时的偏移） */
   function transpose(map, semitones) {
     const out = { name: map.name, description: map.description, warnings: [],
@@ -334,6 +359,7 @@
   return { PRESETS, DEFAULT, KNOWN_CODES, RISKY_CODES, labelOf,
            looksLikeNote, looksLikeCode, detectDirection, toMidi,
            normalize, materialize, fromJSON, toJSON,
-           conflicts, codeToMidi, noteToCode, range, transpose, setBinding, removeNote,
+           conflicts, codeToMidi, noteToCode, range, groupRange, groupName,
+           transpose, setBinding, removeNote,
            sortBinds, LO_MIDI, HI_MIDI };
 });

@@ -1,6 +1,6 @@
 {
   "name": "键盘钢琴（通用主键区）",
-  "description": "在线钢琴最常见的排法：主键区 A S D F G H J K L ; ' 当白键，上一排 W E T Y U O P 当黑键。想改键位就直接改这个文件，存盘后刷新页面即可；也可以在本页的「3 · 键位」面板里直接点着改。",
+  "description": "在线钢琴最常见的排法：A S D F G H J K 是 do re mi fa sol la si do，上一排 W E T Y U 是黑键，正好一组（C4–C5）。存盘后刷新页面即生效；也可以在本页的「3 · 键位」面板里直接点着改，或用钢琴上的 ◀ ▶ 换音区。",
   "notes": {
     "C4": "KeyA",
     "C#4": "KeyW",
@@ -14,11 +14,6 @@
     "A4": "KeyH",
     "A#4": "KeyU",
     "B4": "KeyJ",
-    "C5": "KeyK",
-    "C#5": "KeyO",
-    "D5": "KeyL",
-    "D#5": "KeyP",
-    "E5": "Semicolon",
-    "F5": "Quote"
+    "C5": "KeyK"
   }
 }

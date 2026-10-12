@@ -44,15 +44,42 @@ ok('默认就是"键盘钢琴（通用主键区）"',
   // 主键区的音高关系必须是 do re mi fa sol la si …
   const m = K.materialize(K.DEFAULT);
   const pick = (n) => (m.binds.filter((b) => b.midi === n)[0] || {}).code;
-  ok('主键区那排就是 C 大调音阶',
-     [60, 62, 64, 65, 67, 69, 71, 72, 74, 76].map(pick).join(',') ===
-     'KeyA,KeyS,KeyD,KeyF,KeyG,KeyH,KeyJ,KeyK,KeyL,Semicolon',
-     [60, 62, 64, 65, 67, 69, 71, 72, 74, 76].map(pick).join(','));
-  ok('上一排就是黑键 C#4 D#4 F#4 G#4 A#4 C#5 D#5',
-     [61, 63, 66, 68, 70, 73, 75].map(pick).join(',') ===
-     'KeyW,KeyE,KeyT,KeyY,KeyU,KeyO,KeyP',
-     [61, 63, 66, 68, 70, 73, 75].map(pick).join(','));
-  ok('一共 18 个键（C4–F5）', m.binds.length === 18, m.binds.length);
+  ok('主键区那排就是 C 大调音阶（到高八度的 do 为止）',
+     [60, 62, 64, 65, 67, 69, 71, 72].map(pick).join(',') === 'KeyA,KeyS,KeyD,KeyF,KeyG,KeyH,KeyJ,KeyK',
+     [60, 62, 64, 65, 67, 69, 71, 72].map(pick).join(','));
+  ok('上一排就是黑键 C#4 D#4 F#4 G#4 A#4',
+     [61, 63, 66, 68, 70].map(pick).join(',') === 'KeyW,KeyE,KeyT,KeyY,KeyU',
+     [61, 63, 66, 68, 70].map(pick).join(','));
+  ok('默认正好一组：13 个键（C4–C5）', m.binds.length === 13, m.binds.length);
+}
+
+/* ============================================================
+   1.6 "一组"怎么算 —— 钢琴只画一组，靠这个函数决定范围
+   ============================================================ */
+{
+  const one = K.materialize(K.DEFAULT);                     // C4–C5
+  const g1 = K.groupRange(one);
+  ok('C4–C5 → 正好一组（60–72，8 白 5 黑）',
+     g1.lo === 60 && g1.hi === 72 && g1.octaves === 1, JSON.stringify(g1));
+
+  const tw = K.materialize(K.PRESETS[1]);                   // DAW 那套 C3–B4
+  const g2 = K.groupRange(tw);
+  ok('C3–B4 跨两组时，显示也从整组到整组（48–72，两组）',
+     g2.lo === 48 && g2.hi === 72 && g2.octaves === 2, JSON.stringify(g2));
+
+  const only = K.fromJSON(JSON.stringify({ notes: { 'F#4': 'KeyA' } }));
+  const g3 = K.groupRange(only);
+  ok('只有一个音时也只画那一组（不会只画一个键）',
+     g3.lo === 60 && g3.hi === 72, JSON.stringify(g3));
+
+  ok('组的中文名：C4 = 小字一组', K.groupName(60) === '小字一组', K.groupName(60));
+  ok('组的中文名：C3 = 小字组', K.groupName(48) === '小字组', K.groupName(48));
+  ok('组的中文名：C2 = 大字组', K.groupName(36) === '大字组', K.groupName(36));
+  ok('组的中文名：C5 = 小字二组', K.groupName(72) === '小字二组', K.groupName(72));
+
+  const atEdge = K.fromJSON(JSON.stringify({ notes: { 'C8': 'KeyA' } }));
+  const g4 = K.groupRange(atEdge);
+  ok('最高一个 C 不会算出超过钢琴范围的组', g4.hi <= K.HI_MIDI, JSON.stringify(g4));
 }
 
 /* ============================================================
@@ -215,13 +242,15 @@ ok('默认就是"键盘钢琴（通用主键区）"',
 }
 
 {
-  const m = K.materialize(K.DEFAULT);                 // C4..F5
+  const m = K.materialize(K.DEFAULT);                 // C4..C5
   const up = K.transpose(m, 12);
-  ok('整组升八度：C4→C5、F5→F6', K.range(up).lo === 72 && K.range(up).hi === 89,
+  ok('整组升八度：C4→C5、C5→C6', K.range(up).lo === 72 && K.range(up).hi === 84,
      K.range(up).lo + '–' + K.range(up).hi);
   ok('整组升八度不改变按键（只是每个键换了个音）', codesOf(up) === codesOf(m));
+  ok('升完之后组名也跟着变（小字一组 → 小字二组）',
+     K.groupName(K.groupRange(up).lo) === '小字二组', K.groupName(K.groupRange(up).lo));
   const down = K.transpose(m, -12);
-  ok('整组降八度：C4→C3', K.range(down).lo === 48 && K.range(down).hi === 65,
+  ok('整组降八度：C4→C3', K.range(down).lo === 48 && K.range(down).hi === 60,
      K.range(down).lo + '–' + K.range(down).hi);
 
   const wayDown = K.transpose(m, -60);                // 会撞到 A0 以下
