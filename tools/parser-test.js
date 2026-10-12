@@ -1,114 +1,7 @@
-/* 乐谱文本 DSL 解析器 —— 先在 Node 里验证，再内联进页面 */
-const STEP = { c: 0, d: 2, e: 4, f: 5, g: 7, a: 9, b: 11 };
-const DUR_WORDS = { w: 4, h: 2, q: 1, e: 0.5, s: 0.25, t: 0.125 };
-const NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+/* 乐谱文本 DSL 解析器测试 —— 解析器本体在 ../parser.js，页面和测试共用同一份，
+   避免两边不同步（曾经发生过：加了 vol/歌词，测试却在测旧的副本）。 */
+const { parseScore, formatScore, parsePitch, midiName, parseDur, round2 } = require('../parser.js');
 
-const midiName = (m) => NAMES[((m % 12) + 12) % 12] + (Math.floor(m / 12) - 1);
-
-function parsePitch(tok) {
-  const m = /^([A-Ga-g])((?:#|b|x)*)(-?\d+)$/.exec(tok);
-  if (!m) return null;
-  let semi = STEP[m[1].toLowerCase()];
-  for (const ch of m[2]) { if (ch === '#') semi++; else if (ch === 'b') semi--; else if (ch === 'x') semi += 2; }
-  return (parseInt(m[3], 10) + 1) * 12 + semi;
-}
-
-function parseDur(s) {
-  if (s == null || s === '') return 1;
-  const k = String(s).toLowerCase();
-  if (DUR_WORDS[k] != null) return DUR_WORDS[k];
-  const n = parseFloat(s);
-  return (isNaN(n) || n <= 0) ? null : n;
-}
-
-function parseScore(text) {
-  const errors = [], warnings = [], tracks = [];
-  let cur = null, bpm = 120, beatsPerBar = 4, title = '未命名', timeSig = '4/4';
-
-  const newTrack = (name) => {
-    const t = { name, notes: [], pos: 0, lastBarAt: 0 };
-    tracks.push(t); return t;
-  };
-  const checkBar = (line) => {
-    const at = cur.pos, atBar = cur.pos - cur.lastBarAt;
-    if (atBar > 1e-6 && Math.abs(atBar - beatsPerBar) > 1e-6) {
-      warnings.push({ line, msg: '第 ' + line + ' 行：第 ' + (Math.floor(cur.lastBarAt / beatsPerBar) + 1) +
-        ' 小节只有 ' + round2(atBar) + ' 拍，' + timeSig + ' 应该是 ' + beatsPerBar + ' 拍' });
-    }
-    cur.lastBarAt = at;
-  };
-
-  text.split(/\r?\n/).forEach((raw, i) => {
-    const line = i + 1;
-    const s = raw.replace(/(^|\s)(#|\/\/).*$/, '$1').trim();
-    if (!s) return;
-
-    const dir = /^(bpm|title|time)\s+(.+)$/i.exec(s);
-    if (dir) {
-      const k = dir[1].toLowerCase(), v = dir[2].trim();
-      if (k === 'bpm') {
-        const n = parseFloat(v);
-        if (!(n > 0)) errors.push({ line, msg: 'bpm 必须是正数，收到 "' + v + '"' });
-        else bpm = n;
-      } else if (k === 'title') title = v;
-      else {
-        const m = /^(\d+)\s*\/\s*(\d+)$/.exec(v);
-        if (!m || +m[2] === 0) errors.push({ line, msg: '拍号应写成 4/4 这样的形式，收到 "' + v + '"' });
-        else { timeSig = m[1] + '/' + m[2]; beatsPerBar = (+m[1]) * 4 / (+m[2]); }
-      }
-      return;
-    }
-
-    const th = /^([^:]+):\s*$/.exec(s);
-    if (th) {
-      const name = th[1].trim();
-      // 同名轨道 = 接着往下写，而不是新开一条（方便按乐段分段书写）
-      cur = tracks.find(t => t.name === name) || newTrack(name);
-      return;
-    }
-    if (!cur) cur = newTrack('Track 1');
-
-    // 括号感知分词：和弦 [C4 E4 G4]:2 必须保持为一个 token
-    const tokens = (s.replace(/\|/g, ' | ').match(/\[[^\]]*\](?::\S*)?|\S+/g) || []);
-
-    for (const tok of tokens) {
-      if (tok === '|') { checkBar(line); continue; }
-
-      let durStr = null, items = null;
-      const chord = /^\[([^\]]*)\](?::(.*))?$/.exec(tok);
-      const atom = /^([A-Ga-g][#bx]*-?\d+|[A-Za-z_]+|[-_])(?::(.*))?$/.exec(tok);
-      if (chord) { items = chord[1].trim().split(/\s+/).filter(Boolean); durStr = chord[2]; }
-      else if (atom) { items = [atom[1]]; durStr = atom[2]; }
-      else { errors.push({ line, msg: '看不懂的记号 "' + tok + '"（音符写成 C4 / F#3 / [C4 E4 G4]:2 / r，小节线用 |）' }); continue; }
-
-      const dur = parseDur(durStr);
-      if (dur == null) { errors.push({ line, msg: '时值 "' + durStr + '" 无效：可用拍数数字或 w h q e s' }); continue; }
-
-      const start = cur.pos;
-      for (const it of items) {
-        if (/^(r|rest|_|-)$/i.test(it)) continue;
-        const midi = parsePitch(it);
-        if (midi == null) { errors.push({ line, msg: '无法识别的音名 "' + it + '"（写成 C4、F#3、Bb5 这样）' }); continue; }
-        cur.notes.push({ midi, name: midiName(midi), beat: start, durBeats: dur, velocity: 0.85 });
-      }
-      cur.pos = start + dur;
-    }
-    if (cur.pos > cur.lastBarAt) checkBar(line);   // 行尾也算一次小节检查
-  });
-
-  const clean = tracks.map((t, i) => ({
-    index: i, name: t.name, notes: t.notes
-  })).filter(t => t.notes.length > 0);
-
-  let totalBeats = 0;
-  clean.forEach(t => t.notes.forEach(n => { totalBeats = Math.max(totalBeats, n.beat + n.durBeats); }));
-  const spb = 60 / bpm;
-  clean.forEach(t => t.notes.forEach(n => { n.time = n.beat * spb; n.duration = n.durBeats * spb; }));
-
-  return { title, bpm, timeSig, beatsPerBar, totalBeats, duration: totalBeats * spb,
-           tracks: clean, errors, warnings };
-}
-function round2(n) { return Math.round(n * 100) / 100; }
 
 /**
  * @tonejs/midi 写文本 meta 事件时按「码点 & 0xFF」逐字节写入（不是 UTF-8），
@@ -128,7 +21,8 @@ function fromMidiText(s) {
   return new TextDecoder().decode(bytes);
 }
 
-module.exports = { parseScore, parsePitch, midiName, parseDur, toMidiText, fromMidiText };
+module.exports = { parseScore, parsePitch, midiName, parseDur, toMidiText, fromMidiText,
+                   formatScore, round2 };
 
 if (require.main === module) {
   const { Midi } = require('@tonejs/midi');
@@ -173,6 +67,63 @@ time 4/4
   ok('字母时值 e/h 生效',
      r2.tracks[0].notes.some(n => Math.abs(n.durBeats - 0.5) < 1e-9) &&
      r2.tracks[0].notes.some(n => Math.abs(n.durBeats - 2) < 1e-9));
+
+  /* ---------- barlines off：机器导入的谱面不做拍数校验 ---------- */
+  const rB = parseScore('barlines off\nt:\n C4 C4 | C4 |');
+  ok('barlines off 后小节拍数不再报警', rB.warnings.length === 0, JSON.stringify(rB.warnings));
+  ok('barlines off 不影响音符解析', rB.tracks[0].notes.length === 3, rB.tracks[0].notes.length);
+  const rB2 = parseScore('t:\n C4 C4 | C4 |');
+  ok('默认仍然会报小节拍数', rB2.warnings.length > 0, rB2.warnings.length + ' 条警告');
+
+  /* ---------- vol：分轨音量 ---------- */
+  const rV = parseScore('t1:\n vol 0.4\n C4:4 |\nt2:\n C4:4 |');
+  ok('vol 指令设定了该轨道音量', Math.abs(rV.tracks[0].volume - 0.4) < 1e-9, rV.tracks[0].volume);
+  ok('没写 vol 的轨道音量为 1', Math.abs(rV.tracks[1].volume - 1) < 1e-9, rV.tracks[1].volume);
+  const rVbad = parseScore('t:\n vol 9\n C4:4 |');
+  ok('vol 超范围会报错', rVbad.errors.length > 0, JSON.stringify(rVbad.errors.map(e => e.msg)));
+  const rVoutside = parseScore('vol 0.5\nC4:4 |');
+  ok('vol 写在轨道外会报错', rVoutside.errors.length > 0,
+     JSON.stringify(rVoutside.errors.map(e => e.msg)));
+
+  /* ---------- 歌词 ---------- */
+  const rL = parseScore([
+    '右手:', '  C4 D4 E4 F4 | G4 A4 B4 C5 |',
+    '歌词:', '  一 闪 一 闪 | 亮 晶 晶 - |'
+  ].join('\n'));
+  ok('歌词按顺序对齐旋律', rL.lyrics.map(l => l.syl).join('') === '一闪一闪亮晶晶',
+     rL.lyrics.map(l => l.syl).join(''));
+  ok('歌词拍位取自对应音符',
+     rL.lyrics.length === 7 && Math.abs(rL.lyrics[0].beat - 0) < 1e-9 &&
+     Math.abs(rL.lyrics[6].beat - 6) < 1e-9,
+     rL.lyrics.map(l => l.syl + '@' + l.beat).join(' '));
+  ok('"-" 表示一字多音，会延长上一个字',
+     Math.abs(rL.lyrics[6].durBeats - 2) < 1e-9, rL.lyrics[6].durBeats);
+  ok('歌词轨不会被当成音符轨', rL.tracks.length === 1, rL.tracks.length);
+  const rL2 = parseScore([
+    '右手:', '  C4 D4 |',
+    '歌词:', '  多 出 来 的 字 |'
+  ].join('\n'));
+  ok('歌词比音符多时会给出警告', rL2.warnings.some(w => /歌词/.test(w.msg)),
+     JSON.stringify(rL2.warnings.map(w => w.msg)));
+  ok('没有歌词时 lyrics 为空数组', Array.isArray(rL2.lyrics) === true);
+  const rL3 = parseScore('右手:\n C4 D4 |');
+  ok('不写歌词轨时 lyrics 长度为 0', (rL3.lyrics || []).length === 0);
+
+  /* ---------- formatScore：每小节换行 ---------- */
+  const fIn = ['title T', 'vol 0.5', '', '右手:', '  C4 D4 E4 F4 | G4 A4 B4 C5 |', '歌词:', '  一 二 | 三 四 |'].join('\n');
+  const fOut = formatScore(fIn);
+  const fLines = fOut.split('\n');
+  ok('格式化：音符行每行只剩一个小节线',
+     fLines.filter(l => l.includes('|') && !l.trim().startsWith('#')).every(l => (l.match(/\|/g) || []).length === 1),
+     JSON.stringify(fLines));
+  ok('格式化：轨道头没被拆坏',
+     fLines.some(l => l.trim() === '右手:') && fLines.some(l => l.trim() === '歌词:'),
+     JSON.stringify(fLines));
+  ok('格式化：音符内容没变（去掉空白后一致）',
+     fOut.replace(/\s+/g, '') === fIn.replace(/\s+/g, ''), fOut.replace(/\s+/g, ''));
+  ok('格式化后再解析结果一致',
+     JSON.stringify(parseScore(fOut).tracks.map(t => t.notes.map(n => n.name))) ===
+     JSON.stringify(parseScore(fIn).tracks.map(t => t.notes.map(n => n.name))));
 
   // 升降号与等音
   const r3 = parseScore('t:\n C#4 Db4 B#3 Cb5');

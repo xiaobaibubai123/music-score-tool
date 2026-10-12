@@ -1,0 +1,24 @@
+抽出共享解析器 parser.js；补全歌词支持的单测
+
+发现的严重问题
+  tools/parser-test.js 里有一份独立的 parseScore 副本。我这次给页面加
+  vol / 歌词 / barlines off 时只改了 index.html，测试副本没动 ——
+  于是「解析器单测全部通过」测的是一个过时的解析器。
+  这类漂移不会报错，只会让测试给人虚假的安全感。
+
+修法：抽取共享实现
+- 新增 parser.js（UMD）：浏览器挂 window.ScoreParser，Node 里 require 即可
+- index.html 改为 script src 引入并解构取值，删掉内联副本
+- tools/parser-test.js 改为 require('../parser.js')，删掉自带副本
+- tools/format-score.js 同样改为 require
+- build-dist.js 把 parser.js 计入部署文件
+  现在页面和测试跑的是同一份代码，漂移不可能再发生。
+
+补上的单测（共 18 项，之前完全没覆盖）
+- barlines off：关掉拍数校验后不再报警，且不影响音符解析；默认仍会报警
+- vol：设定轨道音量、未写的轨道为 1、超范围报错、写在轨道外报错
+- 歌词：顺序对齐、拍位取自对应音符、"-" 延音、歌词轨不算音符轨、
+  歌词多于音符时报警告、不写歌词轨时为空数组
+- formatScore：每小节一行、轨道头不被拆坏、内容不变、格式化后解析结果一致
+
+修正一处我写错的断言（旋律每音一拍，第 7 个字在第 6 拍而非第 3 拍）

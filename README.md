@@ -84,6 +84,7 @@ time 4/4
 ```
 music-score-tool/
 ├── index.html                               乐谱工作台（唯一页面）
+├── parser.js                                乐谱 DSL 解析器（页面和测试共用同一份）
 ├── vendor/                                  第三方库（本地化，约 2.2 MB）
 │   ├── Tone.js       音频引擎
 │   ├── Midi.js       MIDI 解析 / 写入
