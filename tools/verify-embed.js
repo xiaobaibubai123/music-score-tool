@@ -77,15 +77,36 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
         /2 条轨道/.test(inside.info) && /21 个音符/.test(inside.info), inside.info);
   check('单页版工作台不含演奏台元素', inside.hasPiano === false);
 
-  // 点试听（激活音频 + 播放）
+  // 点试听（激活音频 + 播放）。首次会先加载 1.9 MB 钢琴采样，
+  // 所以不能固定 sleep，要轮询等 Transport 真的走起来。
   await frame.click('#btnPlay');
-  await sleep(1600);
+  let walked = false;
+  for (let i = 0; i < 60 && !walked; i++) {
+    await sleep(250);
+    walked = await frame.evaluate(() => window.Tone && window.Tone.Transport.seconds > 0.3);
+    if (!walked) {
+      // 上下文没跑起来就再点一次（有些环境下第一次点击只是解锁音频）
+      const st = await frame.evaluate(() => ({
+        ctx: window.Tone && window.Tone.context.state,
+        ready: typeof audioReady !== 'undefined' && audioReady,
+        tr: window.Tone && window.Tone.Transport.state,
+      }));
+      if (st.ctx !== 'running' || st.tr !== 'started') {
+        await frame.click('#btnPlay').catch(() => {});
+      }
+    }
+  }
   const play = await frame.evaluate(() => ({
     sec: window.Tone.Transport.seconds,
     ctx: window.Tone.context.state,
+    kind: typeof instrumentKind !== 'undefined' ? instrumentKind : '',
+    tr: window.Tone.Transport.state,
+    status: document.getElementById('status').textContent,
   }));
   check('iframe 内音频上下文可运行', play.ctx === 'running', play.ctx);
-  check('iframe 内能试听（Transport 走时）', play.sec > 0.3, `sec=${play.sec.toFixed(2)}`);
+  check('iframe 内能试听（Transport 走时）', play.sec > 0.3,
+        `sec=${play.sec.toFixed(2)} transport=${play.tr} 音源=${play.kind} 状态=${play.status.slice(0, 40)}`);
+  check('iframe 内用的是钢琴采样', play.kind === 'sampler', play.kind || '(空)');
   await frame.click('#btnStop');
 
   // 改谱并重新解析

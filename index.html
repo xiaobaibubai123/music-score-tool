@@ -56,6 +56,9 @@
   .trackline{display:flex;align-items:center;gap:8px;font:12px Consolas,monospace;
              padding:4px 0;border-bottom:1px solid #232834}
   .swatch{width:10px;height:10px;border-radius:2px;flex:0 0 auto}
+  .lyricline{font-size:17px;line-height:2.1;letter-spacing:1px;color:#c9d1e0;word-break:break-all}
+  .lyricline .syl{padding:1px 3px;border-radius:4px;transition:background .12s,color .12s}
+  .lyricline .syl.on{background:var(--accent);color:#0d1117;font-weight:700}
   details{background:#191d26;border:1px solid var(--line);border-radius:8px;padding:10px 14px}
   summary{cursor:pointer;color:var(--accent);font-weight:600;font-size:13px}
   details table{border-collapse:collapse;margin-top:8px;font-size:12.5px}
@@ -97,6 +100,7 @@
         <button id="btnExportMid">⬇ 导出 .mid</button>
         <button id="btnExportMp3">⬇ 导出 .mp3</button>
         <button id="btnExportJson">⬇ 导出 .json</button>
+        <button id="btnFormat" title="把每个小节拆成单独一行，方便对着谱子看">🔤 每小节换行</button>
         <button id="btnLoadDemo">载入示例</button>
         <button id="btnClear">清空重写</button>
       </div>
@@ -117,6 +121,8 @@
           <tr><td><code>r</code> 或 <code>-</code></td><td>休止符（不发声，但占时间）</td></tr>
           <tr><td><code>C4 C4 | G4 G4</code></td><td><code>|</code> 是小节线，只帮助你看，不影响发声</td></tr>
           <tr><td><code>主旋律:</code></td><td>以冒号结尾的行 = 新开一条轨道；写多条轨道就是多声部</td></tr>
+          <tr><td><code>vol 0.55</code></td><td>写在某条轨道里面，单独调这条轨道的音量（伴奏左手通常要比右手轻）</td></tr>
+          <tr><td><code>歌词:</code></td><td>单独一行，下面逐字写，按顺序对齐第一条轨道的音符；一个字唱多个音写 <code>-</code></td></tr>
           <tr><td><code>bpm 100</code></td><td>设置速度</td></tr>
           <tr><td><code>title 我的曲子</code></td><td>设置曲名</td></tr>
           <tr><td><code>time 3/4</code></td><td>设置拍号（会用来检查每小节拍数）</td></tr>
@@ -139,6 +145,13 @@
     <div class="panel">
       <h2>4 · 轨道（可单独静音试听）</h2>
       <div id="tracks" class="mono">—</div>
+    </div>
+
+    <div class="panel" id="lyricPanel" style="display:none">
+      <h2>5 · 歌词</h2>
+      <div id="lyrics" class="lyricline">—</div>
+      <div class="hint">写法：<code>歌词:</code> 单独一行，下面逐字写，按顺序对齐<strong>第一条轨道</strong>的音符；
+        一个字唱多个音就写 <code>-</code> 占位。</div>
     </div>
   </div>
 </div>
@@ -190,6 +203,9 @@ function parseScore(text) {
   const errors = [], warnings = [], tracks = [];
   let cur = null, bpm = 120, beatsPerBar = 4, title = '', timeSig = '4/4';
   let checkBars = true;          // barlines off 后只把 | 当视觉分隔，不做每小节拍数校验
+  let lyricMode = false, lyricSyms = [];   // 歌词：音节按顺序对齐第一条轨道的音符
+
+  const isLyricName = (n) => /^(歌词|词|lyrics?|words?)$/i.test((n || '').trim());
 
   const newTrack = (name) => {
     const t = { name: name || ('Track ' + (tracks.length + 1)), notes: [], pos: 0, lastBarAt: 0 };
@@ -232,13 +248,33 @@ function parseScore(text) {
       return;
     }
 
+    // 轨道内的音量指令：vol 0.55（左手伴奏通常要比右手轻）
+    const vol = /^(vol|volume|音量)\s+([\d.]+)$/i.exec(s);
+    if (vol) {
+      if (!cur) { errors.push({ line, msg: 'vol 要写在某条轨道里面，例如：\n左手:\n  vol 0.55' }); return; }
+      const v = parseFloat(vol[2]);
+      if (!(v >= 0 && v <= 2)) errors.push({ line, msg: 'vol 取值范围 0~2，收到 "' + vol[2] + '"' });
+      else cur.volume = v;
+      return;
+    }
+
     const th = /^([^:]+):\s*$/.exec(s);
     if (th) {
       const name = th[1].trim();
+      // 歌词轨：内容不是音符，而是按顺序对齐第一条轨道各音符的音节
+      if (isLyricName(name)) { lyricMode = true; cur = null; return; }
+      lyricMode = false;
       // 同名轨道 = 接着往下写，而不是新开一条（方便按乐段分段书写）
       cur = tracks.find(t => t.name === name) || newTrack(name);
       return;
     }
+
+    // 歌词行：只收音节，不做音符解析
+    if (lyricMode) {
+      for (const sym of (s.replace(/\|/g, ' ').match(/\S+/g) || [])) lyricSyms.push(sym);
+      return;
+    }
+
     if (!cur) cur = newTrack('');
 
     // 括号感知分词：和弦 [C4 E4 G4]:2 必须保持为一个 token
@@ -269,55 +305,132 @@ function parseScore(text) {
     if (cur.pos > cur.lastBarAt) checkBar(line);
   });
 
-  const clean = tracks.map((t, i) => ({ index: i, name: t.name, notes: t.notes }))
-                      .filter(t => t.notes.length > 0);
+  const clean = tracks.map((t, i) => ({
+    index: i, name: t.name, notes: t.notes,
+    volume: t.volume == null ? 1 : t.volume
+  })).filter(t => t.notes.length > 0);
   let totalBeats = 0;
   clean.forEach(t => t.notes.forEach(n => { totalBeats = Math.max(totalBeats, n.beat + n.durBeats); }));
   const spb = 60 / bpm;
   clean.forEach(t => t.notes.forEach(n => { n.time = n.beat * spb; n.duration = n.durBeats * spb; }));
 
+  /* 歌词对齐：按顺序贴到第一条轨道（通常是主旋律）的「音符事件」上。
+     和弦算一个事件；写 "-" 表示这个音继续唱上一个字（一字多音）。 */
+  const lyrics = [];
+  if (lyricSyms.length && clean.length) {
+    const evs = [], seen = new Set();
+    for (const n of clean[0].notes) {
+      const k = n.beat + '|' + n.durBeats;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      evs.push({ beat: n.beat, durBeats: n.durBeats });
+    }
+    let si = 0;
+    for (const ev of evs) {
+      if (si >= lyricSyms.length) break;
+      const sym = lyricSyms[si++];
+      if (sym === '-' || sym === '—') {           // 一字多音：接着唱上一个字
+        const last = lyrics[lyrics.length - 1];
+        if (last) last.durBeats = (ev.beat + ev.durBeats) - last.beat;
+        continue;
+      }
+      lyrics.push({ syl: sym, beat: ev.beat, durBeats: ev.durBeats });
+    }
+    lyrics.forEach(l => { l.time = l.beat * spb; l.duration = l.durBeats * spb; });
+    if (si < lyricSyms.length) {
+      warnings.push({ msg: '歌词有 ' + lyricSyms.length + ' 个字，但旋律只有 ' + evs.length +
+                           ' 个音（事件），多出来的 ' + (lyricSyms.length - si) + ' 个字贴不上' });
+    }
+    if (lyrics.length > evs.length) {
+      warnings.push({ msg: '歌词比旋律音符还多，请检查' });
+    }
+  } else if (lyricSyms.length && !clean.length) {
+    warnings.push({ msg: '只写了歌词，没有可对齐的旋律轨道' });
+  }
+
   return { title, bpm, timeSig, beatsPerBar, totalBeats, duration: totalBeats * spb,
-           tracks: clean, errors, warnings };
+           tracks: clean, lyrics, errors, warnings };
 }
 
 /* ============================================================
    2. 音频引擎
    ============================================================ */
-let synth = null, click = null, audioReady = false;
+let synth = null, click = null, audioReady = false, instrumentKind = '';
 
-/* ---------- 钢琴音色：试听与 MP3 导出共用这一份定义 ----------
- * 实测对比（离线渲染 C5/G5 后算 3kHz 以上能量占比 + 1 秒衰减）：
- *   旧 三角波 + sustain0.32 + 5200Hz 低通 → 高频仅 6.7% / 12.3%，1 秒后仍残留 62%（闷、糊）
- *   现 谐波列 + 钢琴包络 + 9500Hz 低通 → 高频 28% / 47%，1 秒后残留约 15%（亮、音符会衰减掉）
- * 想换音色只改这里，两边一起生效。 */
+/* ============================================================
+   钢琴音源：真实采样优先，合成器兜底
+   ------------------------------------------------------------
+   采样来自 Salamander Grand Piano（CC-BY，见 ATTRIBUTION.md）。
+   为什么不做纯合成：合成器再怎么调都有电子味，尤其右手高音区。
+   采样点从 A0 起每 3 个半音一个直到 C8，共 30 个 mp3（约 1.9 MB），
+   只在首次点播放时加载一次，之后走浏览器强缓存。
+   采样加载失败（离线打开、网络异常）时自动退化为合成器，功能不受影响。
+   ============================================================ */
+/* 采样点：A0 起每 3 个半音一个直到 C8。
+ * ⚠ 键必须是标准音名（D#1），值才是文件名 —— Salamander 的文件名用 s 表示升号（Ds1.mp3），
+ *   直接把文件名当键会让 Tone.Sampler 认不出音名、静默退回合成器。 */
+const PIANO_SAMPLES = {
+  'A0': 'A0.mp3',
+  'C1': 'C1.mp3', 'D#1': 'Ds1.mp3', 'F#1': 'Fs1.mp3', 'A1': 'A1.mp3',
+  'C2': 'C2.mp3', 'D#2': 'Ds2.mp3', 'F#2': 'Fs2.mp3', 'A2': 'A2.mp3',
+  'C3': 'C3.mp3', 'D#3': 'Ds3.mp3', 'F#3': 'Fs3.mp3', 'A3': 'A3.mp3',
+  'C4': 'C4.mp3', 'D#4': 'Ds4.mp3', 'F#4': 'Fs4.mp3', 'A4': 'A4.mp3',
+  'C5': 'C5.mp3', 'D#5': 'Ds5.mp3', 'F#5': 'Fs5.mp3', 'A5': 'A5.mp3',
+  'C6': 'C6.mp3', 'D#6': 'Ds6.mp3', 'F#6': 'Fs6.mp3', 'A6': 'A6.mp3',
+  'C7': 'C7.mp3', 'D#7': 'Ds7.mp3', 'F#7': 'Fs7.mp3', 'A7': 'A7.mp3',
+  'C8': 'C8.mp3'
+};
 const PIANO = {
-  voice: {
+  sampleDir: 'vendor/piano/',
+  samples: PIANO_SAMPLES,
+  volume: -10,      // 采样本身已经很响，3 个音同时弹峰值就冲到 1.39（削波），所以留足余量
+  reverb: { decay: 1.8, preDelay: 0.01, wet: 0.13 },
+  // ↓ 拿不到采样时用的合成器。实测过：三角波谐波太少（高频仅 6.7%）听起来像电子蜂鸣，
+  //   所以这里用 16 个谐波按 1/n^1.3 衰减 + 无 sustain 的钢琴包络。
+  fallback: {
     maxPolyphony: 64,
     oscillator: {
       type: 'custom',
-      // 16 个谐波，幅度按 1/n^1.3 衰减 —— 接近钢琴的频谱
-      // 谐波太少：低音（左手 D#2–E3）最高谐波才 1.2kHz，听起来像纯音、发闷
-      // 谐波太多：高音（右手到 C6）会发刺
       partials: Array.from({ length: 16 }, (_, i) => +(1 / Math.pow(i + 1, 1.3)).toFixed(3))
     },
-    // 钢琴是"敲下去就衰减"，不能有 sustain 长音
     envelope: { attack: 0.004, decay: 2.2, sustain: 0.05, release: 0.85 }
   },
-  filterHz: 9500,                                   // 原来 5200 太闷
-  reverb: { decay: 1.8, preDelay: 0.01, wet: 0.13 }, // 原来 2.0/0.16 偏湿，音符容易糊
-  volume: -8
+  fallbackFilterHz: 9500
 };
+
+/** 建乐器：优先真实钢琴采样，失败退回合成器。试听与 MP3 导出共用这一份。 */
+async function buildInstrument() {
+  const out = new Tone.Gain(1);
+  try {
+    const s = new Tone.Sampler({ urls: PIANO.samples, baseUrl: PIANO.sampleDir });
+    await Tone.loaded();                 // 等所有采样真的下完
+    s.connect(out);
+    return { node: s, out, kind: 'sampler' };
+  } catch (e) {
+    // 采样拿不到（离线打开 / 服务器没放 vendor/piano / 音名写错）时退回合成器。
+    // 一定要留下日志，否则「悄悄退回」很难排查。
+    console.warn('钢琴采样加载失败，退回合成音色：', e && e.message ? e.message : e);
+    const p = new Tone.PolySynth(Tone.Synth, PIANO.fallback);
+    const f = new Tone.Filter({ frequency: PIANO.fallbackFilterHz, type: 'lowpass', rolloff: -12 });
+    p.connect(f); f.connect(out);
+    return { node: p, out, kind: 'synth' };
+  }
+}
 
 async function initAudio() {
   if (audioReady) return;
   if (!Tone) throw new Error('Tone.js 未加载');
   await Tone.start();
+  // 采样要下 1.9 MB，期间用户可能已经去打开文件了 —— 那条状态不能被"音色已就绪"盖掉，
+  // 所以先记住自己写进去的那句，加载完只有它还在时才覆盖。
+  const loadingMsg = '🎹 正在载入钢琴音色…（首次约 1.9 MB，之后就缓存了）';
+  setStatus(loadingMsg);
   const reverb = new Tone.Reverb(PIANO.reverb).toDestination();
-  synth = new Tone.PolySynth(Tone.Synth, PIANO.voice);
-  synth.set({ detune: 4 });
-  const filter = new Tone.Filter({ frequency: PIANO.filterHz, type: 'lowpass', rolloff: -12 });
-  synth.connect(filter); filter.connect(reverb);
-  synth.volume.value = PIANO.volume;
+  const inst = await buildInstrument();
+  inst.out.connect(reverb);
+  inst.node.volume.value = PIANO.volume;
+  synth = inst.node;
+  instrumentKind = inst.kind;
 
   click = new Tone.MembraneSynth({
     pitchDecay: 0.008, octaves: 2,
@@ -325,6 +438,12 @@ async function initAudio() {
   }).toDestination();
   click.volume.value = -14;
   audioReady = true;
+  if ($('status').textContent === loadingMsg) {
+    setStatus(instrumentKind === 'sampler'
+      ? '🎹 钢琴音色已就绪（真实采样）'
+      : '⚠ 采样没加载成功，已退回合成音色（功能正常）',
+      instrumentKind === 'sampler' ? 'ok' : 'warn');
+  }
 }
 const unlock = () => { initAudio().catch(e => fail('初始化音频', e)); };
 document.addEventListener('pointerdown', unlock);
@@ -459,6 +578,39 @@ function renderTracks(p) {
   });
 }
 
+/** 歌词面板：显示整首歌词；播放时高亮当前正在唱的那个字 */
+function renderLyrics(p) {
+  const panel = $('lyricPanel'), host = $('lyrics');
+  if (!p.lyrics || !p.lyrics.length) { panel.style.display = 'none'; host.innerHTML = '—'; return; }
+  panel.style.display = '';
+  host.innerHTML = '';
+  p.lyrics.forEach((l, i) => {
+    const sp = document.createElement('span');
+    sp.className = 'syl';
+    sp.dataset.i = String(i);
+    sp.textContent = l.syl;
+    sp.title = '第 ' + (i + 1) + ' 个字';
+    host.appendChild(sp);
+    host.appendChild(document.createTextNode(' '));
+  });
+}
+
+let lastSylIdx = -1;
+function highlightLyric(beat) {
+  const p = parsed;
+  if (!p || !p.lyrics || !p.lyrics.length) return;
+  let idx = -1;
+  for (let i = 0; i < p.lyrics.length; i++) {
+    const l = p.lyrics[i];
+    if (beat >= l.beat - 1e-6 && beat < l.beat + l.durBeats + 1e-6) { idx = i; break; }
+    if (beat >= l.beat) idx = i;                    // 落在两字之间时贴到前一个字
+  }
+  if (idx === lastSylIdx) return;
+  lastSylIdx = idx;
+  const nodes = $('lyrics').querySelectorAll('.syl');
+  nodes.forEach((n, i) => n.classList.toggle('on', i === idx));
+}
+
 /** 解析文本并刷新整个预览；返回 true 表示解析成功 */
 function reparse(showStatus) {
   const p = parseScore(src.value);
@@ -474,6 +626,7 @@ function reparse(showStatus) {
 
   renderMessages(p);
   renderTracks(p);
+  renderLyrics(p);
   drawRoll();
   updateClock(0);
 
@@ -561,9 +714,10 @@ function scheduleAll() {
   let n = 0;
   for (const t of parsed.tracks) {
     if (muted.has(t.index)) continue;
+    const tv = (t.volume == null ? 1 : t.volume);      // 轨道音量（vol 指令）
     for (const note of t.notes) {
       Tone.Transport.schedule((time) => {
-        synth.triggerAttackRelease(note.name, note.duration, time, note.velocity);
+        synth.triggerAttackRelease(note.name, note.duration, time, note.velocity * tv);
       }, note.time);
       n++;
     }
@@ -628,6 +782,7 @@ function tick() {
     const sec = Tone.Transport.seconds;
     updateClock(sec);
     drawRoll();
+    if (parsed.lyrics && parsed.lyrics.length) highlightLyric(sec / (60 / parsed.bpm));
     if (playing && !Tone.Transport.loop && sec >= parsed.duration + 0.2) {
       stopAll('✅ 播放结束');
     }
@@ -722,15 +877,16 @@ async function renderOffline() {
     } catch (e) {
       reverb = null;                                 // 拿不到混响就退化成干声，不影响导出
     }
-    const s = new Tone.PolySynth(Tone.Synth, PIANO.voice);
-    s.set({ detune: 4 });
-    const filter = new Tone.Filter({ frequency: PIANO.filterHz, type: 'lowpass', rolloff: -12 });
-    s.connect(filter);
-    if (reverb) filter.connect(reverb); else filter.toDestination();
-    s.volume.value = PIANO.volume;
+    // 和试听用同一套乐器（采样优先、合成器兜底）
+    const inst = await buildInstrument();
+    if (reverb) inst.out.connect(reverb); else inst.out.toDestination();
+    inst.node.volume.value = PIANO.volume;
     // 离线渲染固定 44100Hz / 立体声；导出始终包含全部轨道（静音只影响试听）
     for (const t of parsed.tracks) {
-      for (const n of t.notes) s.triggerAttackRelease(n.name, n.duration, n.time, n.velocity);
+      const tv = (t.volume == null ? 1 : t.volume);
+      for (const n of t.notes) {
+        inst.node.triggerAttackRelease(n.name, n.duration, n.time, n.velocity * tv);
+      }
     }
   }, duration, 2, 44100);
 }
@@ -811,6 +967,42 @@ $('btnExportMp3').onclick = async () => {
     exporting = false; btn.disabled = false; btn.textContent = orig;
   }
 };
+
+/* ============================================================
+   7.6 格式化：把每个小节拆成单独一行
+   ============================================================ */
+/**
+ * 在每个小节线 | 处换行，让文本结构和谱面一致（一小节一行，像看谱一样）。
+ * 只动排版，不改任何音符、时值、轨道名。
+ * 解析器把行尾也当一次小节检查，所以「每行正好一小节」时拍数校验依然生效。
+ */
+function formatScore(text) {
+  const out = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const s = raw.trim();
+    if (!s) { out.push(''); continue; }
+    // 注释、全局指令、轨道头、音量指令：原样保留
+    if (/^(#|\/\/)/.test(s) ||
+        /^(bpm|title|time|barlines)\s/i.test(s) ||
+        /^(vol|volume|音量)\s/i.test(s) ||
+        /^[^:]+:\s*$/.test(s)) {
+      out.push(raw.replace(/\s+$/, ''));
+      continue;
+    }
+    const indent = (raw.match(/^\s*/) || [''])[0];
+    const segs = s.split('|');
+    let wrote = false;
+    for (let i = 0; i < segs.length; i++) {
+      const body = segs[i].trim();
+      const isLast = i === segs.length - 1;
+      if (!body) continue;
+      out.push(indent + body + (isLast ? '' : ' |'));
+      wrote = true;
+    }
+    if (!wrote) out.push(raw.replace(/\s+$/, ''));
+  }
+  return out.join('\n').replace(/\n{3,}/g, '\n\n').replace(/\s+$/, '') + '\n';
+}
 
 /* ============================================================
    8. 交互绑定
@@ -1055,6 +1247,21 @@ $('btnClear').onclick = () => {
   stopAll();
   reparse(true);
   src.focus();
+};
+
+$('btnFormat').onclick = () => {
+  const before = src.value;
+  const after = formatScore(before);
+  if (after.replace(/\s+/g, ' ') === before.replace(/\s+/g, ' ')) {
+    return setStatus('已经是每小节一行了，不用再格式化', 'ok');
+  }
+  src.value = after;
+  lastText = after;
+  try { localStorage.setItem(STORE_KEY, after); } catch (e) {}
+  scheduled = false;
+  stopAll();
+  reparse(false);
+  setStatus('🔤 已格式化：每个小节单独一行（只动排版，音符一个没变）', 'ok');
 };
 
 window.addEventListener('error', (e) => fail('未捕获错误', e.message));

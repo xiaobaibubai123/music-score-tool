@@ -7,6 +7,24 @@
 
 ## 运行时依赖（`vendor/`）
 
+### Salamander Grand Piano —— CC BY 3.0
+
+- 文件：`vendor/piano/*.mp3`（30 个，A0–C8 每 3 个半音一个，约 1.9 MB）
+- 用途：**默认音源**。真实钢琴采样，比合成器自然得多
+- 作者：Alexander Holm
+- 来源：https://github.com/sfzinstruments/SalamanderGrandPiano
+- 许可：**Creative Commons Attribution 3.0**（署名即可商用）
+- 本项目通过 Tone.js 官方示例的托管地址获取：
+  https://tonejs.github.io/audio/salamander/
+
+**署名声明（CC BY 要求）**：本项目使用 Salamander Grand Piano v3 音色采样，
+由 Alexander Holm 录制，采用 Creative Commons Attribution 3.0 许可。
+原始项目：https://github.com/sfzinstruments/SalamanderGrandPiano
+
+> 想换成别的音源：替换 `vendor/piano/` 里的 mp3，并同步改 `index.html` 里的 `PIANO_SAMPLES`。
+> 删掉整个 `vendor/piano/` 目录也可以 —— 程序会自动退回内置合成器音色，功能不受影响，
+> 只是音色没那么真实（这条降级路径有自动化测试覆盖）。
+
 ### Tone.js —— MIT
 
 - 版本：14.7.77

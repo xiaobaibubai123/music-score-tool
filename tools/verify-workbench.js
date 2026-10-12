@@ -278,6 +278,38 @@ time 4/4
   const persisted = await page.evaluate(() => document.getElementById('src').value);
   check('刷新后作品仍在（localStorage）', /保存测试/.test(persisted), persisted.split('\n')[0]);
 
+  /* ---------- 12.5 vol 音量 / 歌词 / 每小节换行 ---------- */
+  await setSrc(page, [
+    'title 新功能测试', 'bpm 100', 'time 4/4', '',
+    '右手:', '  C4 D4 E4 F4 | G4 A4 B4 C5 |', '',
+    '左手:', '  vol 0.4', '  C3:4 | C3:4 |', '',
+    '歌词:', '  一 闪 一 闪 | 亮 晶 晶 - |'
+  ].join('\n'));
+  await sleep(400);
+  const feat = await page.evaluate(() => ({
+    vol: parsed.tracks[1].volume,
+    volRight: parsed.tracks[0].volume,
+    lyr: Array.from(document.querySelectorAll('#lyrics .syl')).map(n => n.textContent).join(''),
+    shown: getComputedStyle(document.getElementById('lyricPanel')).display !== 'none',
+  }));
+  check('vol 指令能设定这条轨道的音量', Math.abs(feat.vol - 0.4) < 1e-6, String(feat.vol));
+  check('没写 vol 的轨道音量仍为 1', Math.abs(feat.volRight - 1) < 1e-6, String(feat.volRight));
+  check('歌词面板显示全部音节（"-" 表示一字多音，不额外加字）',
+        feat.lyr === '一闪一闪亮晶晶', feat.lyr);
+  check('歌词面板可见', feat.shown);
+
+  // 每小节换行
+  await page.click('#btnFormat');
+  await sleep(400);
+  const fmt = await page.$eval('#src', el => el.value);
+  const barLines = fmt.split('\n').filter(l => l.includes('|') && !l.trim().startsWith('#'));
+  check('每小节换行：每个音符行只剩一个小节线',
+        barLines.length >= 4 && barLines.every(l => (l.match(/\|/g) || []).length === 1),
+        barLines.length + ' 行，例：' + (barLines[0] || '').trim());
+  check('每小节换行：vol 指令行没被拆坏', /^\s*vol 0\.4\s*$/m.test(fmt));
+  const fmtMsgs = await page.$eval('#msgs', el => el.textContent.trim());
+  check('格式化后仍然没有语法问题', /没有发现语法问题/.test(fmtMsgs), fmtMsgs.slice(0, 60));
+
   /* ---------- 13. 打开 MIDI / JSON 并转成可编辑乐谱文本 ---------- */
   await page.goto(URL, { waitUntil: 'networkidle2' });
   // 页面重新加载后 window.confirm 的覆盖会失效；#btnOpen 有防误覆盖的确认框，
@@ -294,7 +326,15 @@ time 4/4
   // 必须等状态里出现具体文件名：只匹配「转换出乐谱文本」会撞上上一次操作的残留状态（假通过）
   await page.waitForFunction(
     () => document.getElementById('status').textContent.includes('demo.mid'),
-    { timeout: 30000 });
+    { timeout: 30000 }).catch(async () => {
+      const st = await page.evaluate(() => ({
+        status: document.getElementById('status').textContent,
+        info: document.getElementById('info').textContent,
+        srcLen: document.getElementById('src').value.length,
+        errs: (window.__pageErrors || []).slice(0, 3),
+      }));
+      throw new Error('导入 demo.mid 后状态栏没出现文件名。实际：' + JSON.stringify(st));
+    });
   const imported = await page.evaluate(() => ({
     status: document.getElementById('status').textContent,
     info: document.getElementById('info').textContent,

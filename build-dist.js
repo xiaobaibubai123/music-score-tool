@@ -59,11 +59,21 @@ function main() {
     process.exit(1);
   }
 
-  const required = ['vendor/Tone.js', 'vendor/Midi.js', 'assets/demo.mid'];
+  const required = ['vendor/Tone.js', 'vendor/Midi.js', 'vendor/lame.min.js',
+                    'vendor/piano/A0.mp3', 'vendor/piano/C4.mp3', 'vendor/piano/C8.mp3',
+                    'assets/demo.mid'];
   const missing = required.filter(r => !fs.existsSync(path.join(ROOT, r)));
   if (missing.length) {
     console.error('✖ 缺少自包含资源（请先从 node_modules 复制到 vendor/）：');
     missing.forEach(m => console.error('   ' + m));
+    process.exit(1);
+  }
+  // 钢琴采样少一个，对应的音就只能靠邻近采样硬拉，听起来会怪 —— 数量对不上直接拦下
+  const sampleDir = path.join(ROOT, 'vendor', 'piano');
+  const nSamples = fs.existsSync(sampleDir)
+    ? fs.readdirSync(sampleDir).filter(f => f.endsWith('.mp3')).length : 0;
+  if (nSamples < 30) {
+    console.error('✖ 钢琴采样只有 ' + nSamples + ' 个（应为 30 个，A0–C8 每 3 个半音一个）');
     process.exit(1);
   }
 
