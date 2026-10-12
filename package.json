@@ -1,0 +1,24 @@
+{
+  "name": "music-score-tool",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Web 电子乐谱工具 —— 用文字写乐谱，立刻听到效果（纯前端、零依赖、可自部署）",
+  "license": "MIT",
+  "scripts": {
+    "start": "node serve.js",
+    "serve": "node serve.js",
+    "dist": "node build-dist.js",
+    "test": "cd tools && npm test",
+    "test:unit": "cd tools && npm run test:unit"
+  },
+  "keywords": [
+    "music",
+    "score",
+    "piano",
+    "tone.js",
+    "midi"
+  ],
+  "engines": {
+    "node": ">=16"
+  }
+}

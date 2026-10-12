@@ -52,13 +52,30 @@
 
 ## 快速开始
 
+**不用 `npm install`** —— 这是纯前端项目、**零依赖**，一条命令就能跑：
+
 ```bash
 git clone <this-repo>
 cd music-score-tool
 node serve.js
 ```
 
-打开 http://localhost:8081/ ，**点一下页面**激活音频，然后按「▶ 试听」。
+启动后终端会打印出地址：
+
+```text
+乐谱工作台   http://localhost:8081/
+演奏录音页   http://localhost:8081/record.html
+```
+
+打开第一条，**点一下页面**激活音频，然后按「▶ 试听」。
+
+> **端口被占用时会自动往后顺延**（8081 → 8082 → …），并明确告诉你实际用的是哪个，
+> 所以不会出现"启动不了"。**地址一律以终端打印的为准。**
+
+关于根目录那个 `package.json`：它里面**没有任何依赖**，只是让
+`npm install` / `npm start` / `npm test` 这些习惯性命令也能用
+（`npm start` 等价于 `node serve.js`，`npm install` 秒过、不下载任何东西）。
+**只有跑自动化测试才需要装东西** → `cd tools && npm install`。
 
 > 详细步骤、部署到服务器 / 静态托管 / Docker、嵌入个人网站、常见问题排错 →
 > 见 **[docs/部署安装.md](docs/部署安装.md)**
@@ -120,6 +137,7 @@ music-score-tool/
 │   ├── lame.min.js   MP3 编码器（LAME 的 JS 版）
 │   └── piano/*.mp3   钢琴采样（30 个，Salamander Grand Piano，CC BY）
 ├── assets/demo.mid                          内置演示曲
+├── package.json                             零依赖（只是让 npm start / npm test 能用）
 ├── serve.js                                 本地静态服务器（含 gzip/br 压缩 + 分级缓存）
 ├── build-dist.js                            打包成可部署的 dist/
 ├── scores/                                  放你自己的乐谱（仓库里为空）
@@ -195,9 +213,12 @@ JSON 的写法是**音符当 key、按键当 value**：
 
 ```bash
 cd tools
-npm install
-npm test
+npm install     # 只装测试用依赖（puppeteer-core / @tonejs/midi / lamejs），跟页面本身无关
+npm test        # 八套全跑
 ```
+
+> 已经在 `tools/` 装过一次依赖后，回到仓库根目录直接 `npm test` 也行
+> （等价于 `cd tools && npm test`）。根目录的 `npm install` 不会装测试依赖。
 
 八套测试，用真实浏览器驱动：解析器 / 录音逻辑 / 键位 单测，以及工作台 / 演奏录音页 / iframe 嵌入 / MP3 导出 / 钢琴音源 端到端。
 详见 [docs/部署安装.md](docs/部署安装.md) 的「回归测试」一节。
