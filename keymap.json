@@ -1,0 +1,26 @@
+{
+  "name": "键盘钢琴（通用主键区）",
+  "description": "在线钢琴最常见的排法：主键区 A S D F G H J K L ; ' 当白键，上一排 W E T Y U O P 当黑键，Z / X 换八度。想改键位就直接改这个文件，存盘后刷新页面即可；页面上的「键位」面板也能导入别的 JSON、或把当前键位导出来。",
+  "keys": {
+    "KeyA": "C4",
+    "KeyW": "C#4",
+    "KeyS": "D4",
+    "KeyE": "D#4",
+    "KeyD": "E4",
+    "KeyF": "F4",
+    "KeyT": "F#4",
+    "KeyG": "G4",
+    "KeyY": "G#4",
+    "KeyH": "A4",
+    "KeyU": "A#4",
+    "KeyJ": "B4",
+    "KeyK": "C5",
+    "KeyO": "C#5",
+    "KeyL": "D5",
+    "KeyP": "D#5",
+    "Semicolon": "E5",
+    "Quote": "F5"
+  },
+  "octaveDown": "KeyZ",
+  "octaveUp": "KeyX"
+}

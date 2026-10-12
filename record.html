@@ -30,6 +30,9 @@
   button.primary:hover:not(:disabled){background:#69b4ff}
   button.rec{background:var(--rec);border-color:var(--rec);color:#1a0308;font-weight:700}
   button.rec:hover:not(:disabled){background:#ff6b79}
+  a.btnlike{display:inline-block;background:#28303f;color:var(--fg);border:1px solid var(--line);
+            border-radius:7px;padding:7px 14px;font-size:13px;text-decoration:none;margin:0 6px 6px 0}
+  a.btnlike:hover{background:#333d4f;border-color:#465268}
   button:disabled{opacity:.35;cursor:not-allowed}
   #status{font-weight:600;padding:9px 12px;border-radius:8px;background:#20242f;
           border-left:4px solid var(--dim);margin-bottom:12px;min-height:20px}
@@ -57,10 +60,13 @@
              border:1px solid #000;border-radius:0 0 4px 4px;z-index:2}
   .key.black.on{background:linear-gradient(#5fb0ff,#1d5f9e)}
   .key.black.kb{border-bottom:4px solid var(--accent)}
-  .key span{position:absolute;bottom:4px;left:0;width:100%;text-align:center;
-            font:10px Consolas,monospace;color:#7d879b;pointer-events:none}
-  .key.black span{color:#9aa5bb}
-  .key.white.kb span{color:#3f6d9e}
+  .key span{position:absolute;left:0;width:100%;text-align:center;pointer-events:none;
+            font:10px Consolas,monospace;color:#7d879b}
+  .key .nm{bottom:4px}                                    /* 音名 C2 C3 … 只标在 C 上 */
+  .key .tag{top:9px;font-size:11px;font-weight:700;color:#2f6ea8}   /* 键盘上按哪个键 */
+  .key.black .tag{top:6px;font-size:10px;color:#8fc4f5}
+  .key.black .nm{color:#9aa5bb}
+  .key.white.kb .nm{color:#3f6d9e}
   #roll{width:100%;height:220px;background:#0e1016;border:1px solid var(--line);
         border-radius:8px;display:block;margin-bottom:8px}
   #out{width:100%;height:300px;background:#0e1016;color:#dfe6f3;border:1px solid var(--line);
@@ -79,6 +85,12 @@
        margin-right:6px;vertical-align:-1px}
   .dot.live{background:var(--rec);animation:blink .9s infinite}
   @keyframes blink{50%{opacity:.25}}
+  /* 键位面板 */
+  .kbdchips{display:flex;flex-wrap:wrap;gap:5px;margin-top:10px}
+  .kbdchip{display:inline-flex;align-items:center;gap:5px;background:#0e1016;border:1px solid var(--line);
+           border-radius:6px;padding:3px 8px;font:12px Consolas,monospace;color:var(--dim)}
+  .kbdchip b{color:#9fd0ff;font-weight:600}
+  .kbdchip i{font-style:normal;color:#e8ecf4}
 </style>
 </head>
 <body>
@@ -136,29 +148,49 @@
     <button id="btnPanic">✋ 全部松开</button>
     <span class="mono" id="kbInfo"></span>
   </div>
+  <div class="hint" id="kbHint"></div>
+</div>
+
+<!-- ============ 3 · 键位 ============ -->
+<div class="panel">
+  <h2>3 · 键位（可以自己改）</h2>
+  <div class="row">
+    <span class="mono">预设</span>
+    <select id="kmPreset"></select>
+    <button id="btnKmLoad">📂 导入键位 JSON</button>
+    <input type="file" id="kmFile" accept=".json,application/json" hidden>
+    <button id="btnKmSave">⬇ 导出当前键位</button>
+    <a class="btnlike" href="keymap.json" download="keymap.json">⬇ 下载默认 keymap.json</a>
+    <button id="btnKmReset">↺ 恢复默认</button>
+  </div>
+  <div class="mono" id="kmInfo" style="margin-top:8px"></div>
+  <div class="mono" id="kmDesc" style="margin-top:2px;color:#7d879b"></div>
+  <div id="kmKeys" class="kbdchips"></div>
+  <div id="kmWarn"></div>
   <div class="hint">
-    键盘：<kbd>Z</kbd><kbd>S</kbd><kbd>X</kbd><kbd>D</kbd><kbd>C</kbd>…
-    <kbd>V</kbd><kbd>G</kbd><kbd>B</kbd><kbd>H</kbd><kbd>N</kbd><kbd>J</kbd><kbd>M</kbd> 是下面那个八度，
-    <kbd>Q</kbd><kbd>2</kbd><kbd>W</kbd><kbd>3</kbd><kbd>E</kbd>…<kbd>Y</kbd><kbd>7</kbd><kbd>U</kbd> 是上面那个八度
-    （琴键底部有蓝线的那一段）。<kbd>←</kbd><kbd>→</kbd> 换音区。
-    按住的时间越长，音就越长；想弹和弦就同时按几个键。
+    想改键位有两种办法：<br>
+    · <strong>直接改仓库根目录的 <code>keymap.json</code></strong>，存盘后刷新页面即生效（最省事）；
+    里面键名用 <code>KeyboardEvent.code</code>（<code>KeyA</code> / <code>Digit1</code> / <code>Semicolon</code> / <code>ArrowLeft</code>），
+    值可以写音名 <code>"C4"</code> / <code>"F#3"</code>，也可以直接写 MIDI 号 <code>60</code>。<br>
+    · 或者按「⬇ 导出当前键位」拿到一份 JSON，改完再「📂 导入键位 JSON」。
+    导入的键位存在浏览器里，刷新还在；想回到内置的按「↺ 恢复默认」。
   </div>
 </div>
 
 <div class="grid">
   <div>
-    <!-- ============ 3 · 录到的音符 ============ -->
+    <!-- ============ 4 · 录到的音符 ============ -->
     <div class="panel">
-      <h2>3 · 录到的音符</h2>
+      <h2>4 · 录到的音符</h2>
       <canvas id="roll"></canvas>
       <div class="mono" id="stats">还没有音符</div>
     </div>
   </div>
 
   <div>
-    <!-- ============ 4 · 生成的乐谱脚本 ============ -->
+    <!-- ============ 5 · 生成的乐谱脚本 ============ -->
     <div class="panel">
-      <h2>4 · 生成的乐谱脚本</h2>
+      <h2>5 · 生成的乐谱脚本</h2>
       <div class="row" style="margin:0 0 8px">
         <span class="mono">曲名</span>
         <input type="text" id="title" value="我的演奏" style="width:190px">
@@ -177,6 +209,7 @@
 <script src="parser.js"></script>
 <script src="audio.js"></script>
 <script src="recorder.js"></script>
+<script src="keymap.js"></script>
 <script>
 "use strict";
 /* ============================================================
@@ -242,7 +275,30 @@ document.addEventListener('pointerdown', () => { initAudio().catch((e) => fail('
 const REC = { state: 'idle', t0: 0, origin: 0, pauseAt: 0, events: [], held: new Map() };
 const pressed = new Set();          // 当前物理按住的音（不管有没有在录）
 const kbHeld = new Map();           // e.code → midi
-let kbBase = 48;                    // 电脑键盘的起始音（默认 C3）
+
+/* 键位：默认用「通用主键区」（A S D F G H J K L ; 当白键，W E T U Y O P 当黑键），
+   也可以由 keymap.json 或页面导入的 JSON 覆盖，见 keymap.js。 */
+const Keymap = window.ScoreKeymap;
+const KB_STORE = 'musicmaker.keymap';
+let keymap = Keymap.materialize(Keymap.DEFAULT);
+let octaveShift = 0;                // 整体挪几个半音（永远 ±12 的整数倍）
+let keyToMidi = {};                 // e.code → 实际发声的 MIDI（已含八度偏移）
+
+function rebuildKeyIndex() {
+  keyToMidi = Keymap.resolveAll(keymap, octaveShift);
+}
+function applyKeymap(map, opts) {
+  keymap = map;
+  const lim = Keymap.shiftLimits(keymap);
+  octaveShift = Math.max(-lim.down * 12, Math.min(lim.up * 12, octaveShift || 0));
+  rebuildKeyIndex();
+  paintKbBand();
+  renderKeymapPanel();
+  if (!opts || !opts.keepStatus) {
+    setStatus('⌨ 键位已换成「' + keymap.name + '」' +
+      (keymap.warnings.length ? '（有 ' + keymap.warnings.length + ' 条提示，见键位面板）' : ''), 'ok');
+  }
+}
 
 const recTime = () => ctxNow() - REC.origin;
 const spbNow  = () => 60 / (Math.max(30, Math.min(240, +$('bpm').value || 90)));
@@ -308,38 +364,50 @@ function updateLastNote(midi) {
   lastNoteTimer = setTimeout(() => { el.textContent = kbBandText(); }, 1200);
 }
 function kbBandText() {
-  return '键盘音区 ' + midiName(kbBase) + ' – ' + midiName(kbBase + 28) + '（← → 换）';
+  const r = Keymap.range(keymap);
+  const shift = octaveShift ? '（' + (octaveShift > 0 ? '+' : '') + (octaveShift / 12) + ' 个八度）' : '';
+  return '键盘音区 ' + midiName(r.lo + octaveShift) + ' – ' + midiName(r.hi + octaveShift) + shift;
 }
 
 /* ============================================================
-   4. 电脑键盘映射
-   ============================================================ */
-/* 低八度：Z X C V B N M（白键）S D G H J（黑键）
-   高八度：Q W E R T Y U（白键）2 3 5 6 7（黑键）
-   再往上补 I O P，够得到更高的音 */
-const KEYMAP = {
-  KeyZ: 0, KeyS: 1, KeyX: 2, KeyD: 3, KeyC: 4, KeyV: 5, KeyG: 6, KeyB: 7,
-  KeyH: 8, KeyN: 9, KeyJ: 10, KeyM: 11,
-  KeyQ: 12, Digit2: 13, KeyW: 14, Digit3: 15, KeyE: 16, KeyR: 17, Digit5: 18,
-  KeyT: 19, Digit6: 20, KeyY: 21, Digit7: 22, KeyU: 23,
-  KeyI: 24, Digit9: 25, KeyO: 26, Digit0: 27, KeyP: 28
-};
+   4. 电脑键盘：键位表说了算（默认「通用主键区」）
+   ------------------------------------------------------------
+   只认 KeyboardEvent.code，不认 e.key —— 中文输入法下 e.key 可能是 "Process"，
+   大小写、Shift、CapsLock 也都会影响它。 */
 const isTyping = (e) => e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);
+
+function shiftOct(steps) {
+  const lim = Keymap.shiftLimits(keymap);
+  const next = Math.max(-lim.down * 12, Math.min(lim.up * 12, octaveShift + steps * 12));
+  if (next === octaveShift) return;
+  releaseAll();
+  octaveShift = next;
+  rebuildKeyIndex();
+  paintKbBand();
+  $('kbInfo').textContent = kbBandText();
+  renderKeymapPanel();
+  saveKeymap();
+}
 
 window.addEventListener('keydown', (e) => {
   if (e.ctrlKey || e.metaKey || e.altKey) return;
+  // ← → 永远可以换八度（不管当前键位表怎么写），用手敲键盘的人都指望这个
   if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
     if (isTyping(e)) return;
     e.preventDefault();
-    shiftOct(e.code === 'ArrowLeft' ? -12 : 12);
+    shiftOct(e.code === 'ArrowLeft' ? -1 : 1);
     return;
   }
   if (e.code === 'Space') { e.preventDefault(); return; }   // 别让空格把页面滚下去
   if (isTyping(e)) return;
-  const off = KEYMAP[e.code];
-  if (off == null || kbHeld.has(e.code)) return;             // 按住不放不重复触发
+  if (keymap.octaveDown === e.code || keymap.octaveUp === e.code) {
+    e.preventDefault();
+    shiftOct(keymap.octaveUp === e.code ? 1 : -1);
+    return;
+  }
+  const midi = keyToMidi[e.code];
+  if (midi == null || kbHeld.has(e.code)) return;            // 按住不放不重复触发
   e.preventDefault();
-  const midi = kbBase + off;
   kbHeld.set(e.code, midi);
   noteOn(midi, 0.85);
 });
@@ -350,15 +418,6 @@ window.addEventListener('keyup', (e) => {
   noteOff(midi);
 });
 window.addEventListener('blur', () => releaseAll());
-
-function shiftOct(d) {
-  const next = Math.max(36, Math.min(60, kbBase + d));
-  if (next === kbBase) return;
-  releaseAll();
-  kbBase = next;
-  paintKbBand();
-  $('kbInfo').textContent = kbBandText();
-}
 
 /* ============================================================
    5. 钢琴键盘（画出来 + 鼠标/触摸）
@@ -380,7 +439,7 @@ function buildPiano() {
     el.dataset.midi = m;
     el.style.left = (i * unit) + '%';
     el.style.width = unit + '%';
-    if (m % 12 === 0) el.innerHTML = '<span>' + midiName(m) + '</span>';
+    if (m % 12 === 0) el.innerHTML = '<span class="nm">' + midiName(m) + '</span>';
     host.appendChild(el);
   });
   for (let m = PIANO_LO; m <= PIANO_HI; m++) {
@@ -397,11 +456,22 @@ function buildPiano() {
   paintKbBand();
 }
 
-/** 给电脑键盘当前覆盖的那两个八度加一条蓝线，让人知道敲键盘会响哪几个音 */
+/** 把电脑键盘当前绑定的键位画到琴键上（底部蓝线 + 键位字母），
+ *  这样"哪个键弹哪个音"一眼就能看到，不用去翻说明。 */
 function paintKbBand() {
+  const midiToLabel = {};
+  for (const code of Object.keys(keyToMidi)) {
+    const m = keyToMidi[code];
+    if (midiToLabel[m] == null) midiToLabel[m] = Keymap.labelOf(code);
+  }
   $('piano').querySelectorAll('.key').forEach((el) => {
     const m = +el.dataset.midi;
-    el.classList.toggle('kb', m >= kbBase && m <= kbBase + 28);
+    const label = midiToLabel[m];
+    el.classList.toggle('kb', label != null);
+    let tag = el.querySelector('.tag');
+    if (label == null) { if (tag) tag.remove(); return; }
+    if (!tag) { tag = document.createElement('span'); tag.className = 'tag'; el.appendChild(tag); }
+    tag.textContent = label;
   });
 }
 
@@ -439,8 +509,8 @@ function midiAt(e) {
   host.addEventListener('pointerup', up);
   host.addEventListener('pointercancel', up);
   host.addEventListener('lostpointercapture', up);
-  $('octDown').onclick = () => shiftOct(-12);
-  $('octUp').onclick = () => shiftOct(12);
+  $('octDown').onclick = () => shiftOct(-1);
+  $('octUp').onclick = () => shiftOct(1);
   $('btnPanic').onclick = () => { releaseAll(); setStatus('✋ 已松开所有音'); };
 })();
 
@@ -476,7 +546,10 @@ async function startRec() {
 
   const spb = spbNow();
   const countIn = $('chkCountin').checked ? Math.round(barBeats()) : 0;
-  const t0 = ctxNow() + 0.35;                        // 留一点余量，第一下节拍器才来得及排程
+  // 起始余量：节拍器的第一下要排在"未来"才排得进 Tone 的调度队列，
+  // 但这段余量同时也是"第 0 拍之前"，开头的音会被压到第 0 拍上（挤成和弦）。
+  // 所以只留 0.12 秒；勾了预备小节的话，倒数那一小节本来就够用了。
+  const t0 = ctxNow() + 0.12;
   REC.t0 = t0;
   REC.origin = t0 + countIn * spb;
   REC.state = countIn > 0 ? 'countin' : 'rec';
@@ -759,7 +832,187 @@ function download(blob, filename) {
 const safeName = (s) => (s || 'score').replace(/[\\/:*?"<>|]/g, '_');
 
 /* ============================================================
-   10. 交互绑定 / 启动
+   10. 键位面板：预设 / 导入 JSON / 导出 / 恢复默认
+   ============================================================ */
+function renderKeymapPanel() {
+  $('kmInfo').textContent = '当前：' + keymap.name + ' · ' + Object.keys(keymap.keys).length + ' 个键' +
+    (octaveShift ? ' · 已整体' + (octaveShift > 0 ? '升' : '降') + Math.abs(octaveShift / 12) + ' 个八度' : '');
+  $('kmDesc').textContent = keymap.description || '';
+  const host = $('kmKeys');
+  host.innerHTML = '';
+  // 按音高排序，显示成「A = C4」这样的小标签
+  const rows = Object.keys(keyToMidi).map((code) => ({ code, midi: keyToMidi[code] }))
+                     .sort((a, b) => a.midi - b.midi || a.code.localeCompare(b.code));
+  rows.forEach((r) => {
+    const s = document.createElement('span');
+    s.className = 'kbdchip';
+    s.innerHTML = '<b></b> <i></i>';
+    s.querySelector('b').textContent = Keymap.labelOf(r.code);
+    s.querySelector('i').textContent = midiName(r.midi);
+    host.appendChild(s);
+  });
+  const warn = $('kmWarn');
+  warn.innerHTML = '';
+  (keymap.warnings || []).forEach((w) => {
+    const d = document.createElement('div');
+    d.className = 'msg warn';
+    d.textContent = '⚠ ' + w;
+    warn.appendChild(d);
+  });
+  $('kmPreset').value = keymap.presetId || '';
+  $('kbHint').innerHTML = kbHintHTML();
+}
+
+/** 键位说明是跟着键位表变的，不能写死 */
+function kbHintHTML() {
+  const map = keyToMidi;
+  const byCode = {};
+  Object.keys(map).forEach((c) => { byCode[c] = map[c]; });
+  const white = [], black = [];
+  Object.keys(byCode).sort((a, b) => byCode[a] - byCode[b]).forEach((c) => {
+    const m = byCode[c];
+    (BLACK.indexOf(((m % 12) + 12) % 12) >= 0 ? black : white).push(Keymap.labelOf(c));
+  });
+  const tag = (arr) => arr.map((x) => '<kbd>' + x + '</kbd>').join('');
+  return '白键：' + tag(white) + '<br>黑键：' + tag(black) +
+    '<br>换八度：<kbd>' + Keymap.labelOf(keymap.octaveUp) + '</kbd> 升 / <kbd>' +
+    Keymap.labelOf(keymap.octaveDown) + '</kbd> 降，<kbd>←</kbd><kbd>→</kbd> 也可以。' +
+    '<br>按住的时间越长，音就越长；想弹和弦就同时按几个键。';
+}
+
+function loadPreset(id) {
+  const p = Keymap.PRESETS.filter((x) => x.name === id)[0];
+  if (!p) return;
+  const m = Keymap.materialize(p);
+  m.presetId = p.name;
+  m.custom = false;
+  applyKeymap(m);
+  saveKeymap();
+}
+function saveKeymap() {
+  try {
+    localStorage.setItem(KB_STORE, JSON.stringify({
+      custom: !!keymap.custom,
+      presetId: keymap.presetId || '',
+      shift: octaveShift,
+      map: { name: keymap.name, description: keymap.description, keys: keymap.keys,
+             octaveDown: keymap.octaveDown, octaveUp: keymap.octaveUp }
+    }));
+  } catch (e) {}
+}
+function loadSavedKeymap() {
+  try {
+    const raw = localStorage.getItem(KB_STORE);
+    if (!raw) return null;
+    const o = JSON.parse(raw);
+    if (!o || !o.map || !o.map.keys) return null;
+    return o;
+  } catch (e) { return null; }
+}
+
+async function loadKeymapFile() {
+  // keymap.json 放在仓库根目录，直接改它 + 刷新页面就能生效
+  try {
+    const r = await fetch('keymap.json', { cache: 'no-cache' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const m = Keymap.fromJSON(await r.text());
+    m.presetId = Keymap.PRESETS.some((p) => p.name === m.name) ? m.name : '';
+    applyKeymap(m, { keepStatus: true });
+    return true;
+  } catch (e) {
+    // 用 file:// 直接打开、或文件被删了，都会走到这里 —— 内置键位照样能用
+    console.warn('keymap.json 没读到，用内置键位：', e && e.message ? e.message : e);
+    return false;
+  }
+}
+
+/* 启动时的优先级：
+   ① 用户自己导入过 JSON（localStorage 里 custom=true）→ 用他的，别被 keymap.json 盖掉
+   ② 否则 → keymap.json（想改就改这个文件，刷新即生效）
+   ③ 文件不在了（file:// 打开 / 删掉了）→ 上次选的预设，再不行就是内置默认 */
+(async function initKeymap() {
+  const saved = loadSavedKeymap();
+  if (saved && saved.custom) {
+    const m = Keymap.normalize(saved.map);
+    m.custom = true;
+    m.presetId = saved.presetId || '';
+    octaveShift = typeof saved.shift === 'number' ? saved.shift : 0;
+    applyKeymap(m, { keepStatus: true });
+    $('kbInfo').textContent = kbBandText();
+    setStatus('⌨ 已载入你导入过的键位「' + keymap.name + '」（想回到内置的按「↺ 恢复默认」）');
+    return;
+  }
+  const fromFile = await loadKeymapFile();
+  if (fromFile) {
+    $('kbInfo').textContent = kbBandText();
+    setStatus('👋 键位来自 keymap.json：' + keymap.name + '。按「⏺ 开始录音」→ 弹 → 「⏹ 结束生成乐谱」。');
+    return;
+  }
+  if (saved && saved.presetId) {
+    const p = Keymap.PRESETS.filter((x) => x.name === saved.presetId)[0];
+    if (p) {
+      const m = Keymap.materialize(p);
+      m.presetId = p.name;
+      octaveShift = typeof saved.shift === 'number' ? saved.shift : 0;
+      applyKeymap(m, { keepStatus: true });
+    }
+  }
+  $('kbInfo').textContent = kbBandText();
+  renderKeymapPanel();
+})();
+
+(function bindKeymapUI() {
+  const sel = $('kmPreset');
+  Keymap.PRESETS.forEach((p) => {
+    const o = document.createElement('option');
+    o.value = p.name;
+    o.textContent = p.name;
+    sel.appendChild(o);
+  });
+  sel.addEventListener('change', () => loadPreset(sel.value));
+
+  $('btnKmLoad').onclick = () => $('kmFile').click();
+  $('kmFile').addEventListener('change', () => {
+    const f = $('kmFile').files[0];
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = () => {
+      try {
+        const m = Keymap.fromJSON(String(r.result));
+        m.presetId = Keymap.PRESETS.some((p) => p.name === m.name) ? m.name : '';
+        m.custom = true;                        // 用户自己导入的，刷新后优先于 keymap.json
+        applyKeymap(m);
+        saveKeymap();
+      } catch (e) { fail('读取键位 ' + f.name, e); }
+      $('kmFile').value = '';                 // 同一个文件再选一次也要能触发
+    };
+    r.onerror = () => fail('读取键位文件', r.error);
+    r.readAsText(f);
+  });
+
+  $('btnKmSave').onclick = () => {
+    download(new Blob([Keymap.toJSON(keymap)], { type: 'application/json;charset=utf-8' }),
+             'keymap-' + (keymap.name || 'custom') + '.json');
+    setStatus('⬇ 已导出当前键位 JSON —— 改完再用「📂 导入键位 JSON」传回来', 'ok');
+  };
+
+  $('btnKmReset').onclick = async () => {
+    try { localStorage.removeItem(KB_STORE); } catch (e) {}
+    octaveShift = 0;
+    const m = Keymap.materialize(Keymap.DEFAULT);
+    m.presetId = m.name;
+    m.custom = false;
+    applyKeymap(m, { keepStatus: true });
+    const okFile = await loadKeymapFile();      // 根目录有 keymap.json 就以它为准
+    renderKeymapPanel();
+    setStatus(okFile
+      ? '↺ 已恢复到 keymap.json 里的键位：' + keymap.name
+      : '↺ 已恢复内置默认键位：' + keymap.name, 'ok');
+  };
+})();
+
+/* ============================================================
+   11. 交互绑定 / 启动
    ============================================================ */
 $('btnStart').onclick = () => startRec();
 $('btnPause').onclick = () => doPause();
@@ -823,14 +1076,16 @@ window.addEventListener('error', (e) => fail('未捕获错误', e.message));
   sm.disabled = true;
 })();
 
+rebuildKeyIndex();                 // 先把键位索引建好，画琴键时才知道每个音对应哪个字母
 buildPiano();
 fitRoll();
 updateStats();
 setButtons();
 renderCheck(null);
+renderKeymapPanel();
 $('kbInfo').textContent = kbBandText();
 tick();
-setStatus('👋 按「⏺ 开始录音」→ 弹 → 按「⏹ 结束并生成乐谱」。也可以先直接敲 Z 键听听琴声。');
+setStatus('👋 按「⏺ 开始录音」→ 弹 → 按「⏹ 结束并生成乐谱」。也可以先敲 A / S / D 听听琴声。');
 </script>
 </body>
 </html>

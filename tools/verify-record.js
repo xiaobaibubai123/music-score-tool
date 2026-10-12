@@ -42,10 +42,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     white: document.querySelectorAll('.key.white').length,
     black: document.querySelectorAll('.key.black').length,
     kb: document.querySelectorAll('.key.kb').length,
+    tags: Array.prototype.map.call(document.querySelectorAll('.key.kb .tag'), (e) => e.textContent).join(''),
     grids: Array.prototype.map.call(document.getElementById('grid').options, (o) => o.value),
     btns: ['btnStart', 'btnPause', 'btnResume', 'btnEnd'].map((id) => document.getElementById(id).textContent.trim()),
     startEnabled: !document.getElementById('btnStart').disabled,
     pauseEnabled: !document.getElementById('btnPause').disabled,
+    kmName: (typeof keymap !== 'undefined') ? keymap.name : '',
+    kmCount: (typeof keymap !== 'undefined') ? Object.keys(keymap.keys).length : 0,
+    keyToMidi: (typeof keyToMidi !== 'undefined') ? keyToMidi : {},
+    presets: Array.prototype.map.call(document.getElementById('kmPreset').options, (o) => o.value),
   }));
   check('琴键都画出来了（C2–C7，36 白 25 黑）',
         shape.keys === 61 && shape.white === 36 && shape.black === 25,
@@ -56,18 +61,42 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check('待机时只有「开始」能按', shape.startEnabled && !shape.pauseEnabled);
   check('量化网格 1/4、1/8、1/16、1/32 都有',
         shape.grids.join(',') === '1/4,1/8,1/16,1/32', shape.grids.join(','));
-  check('键盘音区高亮覆盖两个八度（29 个键）', shape.kb === 29, shape.kb + ' 个键有蓝线');
+  check('琴键上直接标出"按哪个键"（A S D F …）',
+        shape.kb === 18 && /A/.test(shape.tags) && /S/.test(shape.tags) && /D/.test(shape.tags),
+        shape.kb + ' 个键有标记：' + shape.tags);
+
+  /* ---------- 1.5 默认键位 = 通用"键盘钢琴"主键区 ---------- */
+  const D = await page.evaluate(() => ({
+    A: keyToMidi.KeyA, S: keyToMidi.KeyS, D: keyToMidi.KeyD, F: keyToMidi.KeyF,
+    H: keyToMidi.KeyH, J: keyToMidi.KeyJ, K: keyToMidi.KeyK,
+    W: keyToMidi.KeyW, E: keyToMidi.KeyE, semicolon: keyToMidi.Semicolon,
+    z: keyToMidi.KeyZ, x: keyToMidi.KeyX,
+    up: keymap.octaveUp, down: keymap.octaveDown,
+    presetCount: document.getElementById('kmPreset').options.length,
+  }));
+  check('默认是"键盘主键区"：A S D F G H J K L ; 就是 do re mi fa sol la si do re mi',
+        D.A === 60 && D.S === 62 && D.D === 64 && D.F === 65 && D.H === 69 &&
+        D.J === 71 && D.K === 72 && D.semicolon === 76,
+        'A=' + D.A + ' S=' + D.S + ' D=' + D.D + ' F=' + D.F + ' H=' + D.H + ' J=' + D.J + ' K=' + D.K + ' ;=' + D.semicolon);
+  check('白键上一排就是黑键（W E → C#4 D#4）', D.W === 61 && D.E === 63, 'W=' + D.W + ' E=' + D.E);
+  check('Z / X 当换八度，不再占音符', D.z == null && D.x == null && D.up === 'KeyX' && D.down === 'KeyZ',
+        'Z=' + D.z + ' X=' + D.x + ' up=' + D.up);
+  check('内置了多个预设可选', D.presetCount >= 3, D.presetCount + ' 个预设');
 
   /* ---------- 2. 和乐谱工作台共用同一份音源 ---------- */
   const shared = await page.evaluate(() => ({
     hasAudio: typeof window.ScoreAudio !== 'undefined',
     hasRec: typeof window.ScoreRecorder !== 'undefined',
+    hasKm: typeof window.ScoreKeymap !== 'undefined',
     samePiano: window.ScoreAudio && typeof PIANO !== 'undefined' && window.ScoreAudio.PIANO === PIANO,
     samples: window.ScoreAudio ? Object.keys(window.ScoreAudio.PIANO.samples).length : 0,
+    kmFromFile: (typeof keymap !== 'undefined') && keymap.name === (window.ScoreKeymap.DEFAULT.name),
   }));
   check('页面从 audio.js 拿音源（没有自己再复制一份）',
         shared.hasAudio && shared.hasRec && shared.samePiano && shared.samples >= 25,
         '采样 ' + shared.samples + ' 个 / 同一个 PIANO 对象 ' + shared.samePiano);
+  check('键位模块独立成 keymap.js，且 keymap.json 确实被读到',
+        shared.hasKm && shared.kmFromFile, '有 ScoreKeymap=' + shared.hasKm + ' / 名字对得上=' + shared.kmFromFile);
 
   /* ---------- 3. 先解锁音频 ---------- */
   await page.mouse.click(700, 8);
@@ -82,11 +111,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     document.getElementById('chkCountin').checked = true;
   });
   await page.click('#btnStart');
-  const inCountIn = await page.waitForFunction(() => REC.state === 'countin', { timeout: 10000 })
-    .then(() => true).catch(() => false);
-  const countText = inCountIn ? await page.evaluate(() => document.getElementById('recInfo').textContent) : '';
+  // 倒数文字是 rAF 里画的，只等 REC.state 会撞上"状态已变但这一帧还没画"的竞态
+  const inCountIn = await page.waitForFunction(
+    () => REC.state === 'countin' && /预备/.test(document.getElementById('recInfo').textContent),
+    { timeout: 10000 }).then(() => true).catch(() => false);
+  const countText = await page.evaluate(() => document.getElementById('recInfo').textContent);
   // 预备拍里弹一下，结束之后不该出现在乐谱里
-  await page.keyboard.down('KeyZ'); await sleep(150); await page.keyboard.up('KeyZ');
+  await page.keyboard.down('KeyA'); await sleep(150); await page.keyboard.up('KeyA');
   const counted = await page.evaluate(() => REC.events.length);
   const toRec = await page.waitForFunction(() => REC.state === 'rec', { timeout: 15000 })
     .then(() => true).catch(() => false);
@@ -97,27 +128,130 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await page.evaluate(() => { document.getElementById('chkCountin').checked = false; });
 
   /* ---------- 4. 键盘弹奏：按住要亮、松开要灭 ---------- */
-  await page.keyboard.down('KeyZ');
+  await page.keyboard.down('KeyA');
   await sleep(120);
   const held = await page.evaluate(() => {
-    const el = document.querySelector('.key[data-midi="48"]');
+    const el = document.querySelector('.key[data-midi="60"]');
     return { on: el.classList.contains('on'), pressed: pressed.size };
   });
-  await page.keyboard.up('KeyZ');
+  await page.keyboard.up('KeyA');
   await sleep(120);
   const released = await page.evaluate(() => ({
-    on: document.querySelector('.key[data-midi="48"]').classList.contains('on'), pressed: pressed.size,
+    on: document.querySelector('.key[data-midi="60"]').classList.contains('on'), pressed: pressed.size,
   }));
-  check('敲 Z 键会按下 C3（琴键亮起）', held.on && held.pressed === 1, JSON.stringify(held));
+  check('敲 A 键会按下 C4（琴键亮起）', held.on && held.pressed === 1, JSON.stringify(held));
   check('松手后琴键熄灭', !released.on && released.pressed === 0, JSON.stringify(released));
 
-  const oct = await page.evaluate(() => ({ base: kbBase }));
+  const oct = await page.evaluate(() => ({ shift: octaveShift }));
+  await page.keyboard.down('KeyX'); await page.keyboard.up('KeyX');       // 键位表指定的升八度
+  const oct2 = await page.evaluate(() => ({ shift: octaveShift }));
+  await page.keyboard.down('KeyZ'); await page.keyboard.up('KeyZ');
+  const oct3 = await page.evaluate(() => ({ shift: octaveShift }));
+  check('Z / X 能换八度', oct.shift === 0 && oct2.shift === 12 && oct3.shift === 0,
+        oct.shift + ' → ' + oct2.shift + ' → ' + oct3.shift);
+
   await page.keyboard.press('ArrowRight');
-  const oct2 = await page.evaluate(() => ({ base: kbBase }));
+  const oct4 = await page.evaluate(() => ({ shift: octaveShift, a: keyToMidi.KeyA }));
   await page.keyboard.press('ArrowLeft');
-  const oct3 = await page.evaluate(() => ({ base: kbBase }));
-  check('← → 能换音区', oct.base === 48 && oct2.base === 60 && oct3.base === 48,
-        oct.base + ' → ' + oct2.base + ' → ' + oct3.base);
+  const oct5 = await page.evaluate(() => ({ shift: octaveShift, a: keyToMidi.KeyA }));
+  check('← → 也能换八度（不管键位表怎么写）',
+        oct4.shift === 12 && oct4.a === 72 && oct5.shift === 0 && oct5.a === 60,
+        '升八度后 A=' + oct4.a + '，回来=' + oct5.a);
+
+  const oct6 = await page.evaluate(() => {
+    document.getElementById('octUp').click();
+    const up = octaveShift;
+    document.getElementById('octDown').click();
+    return { up: up, back: octaveShift };
+  });
+  check('面板上的「音区升高 / 降低」按钮也管用', oct6.up === 12 && oct6.back === 0,
+        oct6.up + ' → ' + oct6.back);
+
+  /* ---------- 4.5 换键位：预设 + 导入 JSON ---------- */
+  const presetSwitch = await page.evaluate(() => {
+    const sel = document.getElementById('kmPreset');
+    sel.value = '双排两个八度（DAW / 电钢风格）';
+    sel.dispatchEvent(new Event('change'));
+    return { name: keymap.name, z: keyToMidi.KeyZ, a: keyToMidi.KeyA, q: keyToMidi.KeyQ, up: keymap.octaveUp };
+  });
+  check('切到「双排两个八度」预设后，Z 变成 C3、A 不再绑音',
+        /双排/.test(presetSwitch.name) && presetSwitch.z === 48 && presetSwitch.a == null &&
+        presetSwitch.q === 60 && presetSwitch.up === 'ArrowRight',
+        JSON.stringify(presetSwitch));
+
+  // 页面上直接改键位 JSON 文本再导入
+  await page.evaluate(() => {
+    const sel = document.getElementById('kmPreset');
+    sel.value = '键盘钢琴（通用主键区）';
+    sel.dispatchEvent(new Event('change'));
+  });
+  await page.evaluate(() => {
+    window.__KM = JSON.stringify({
+      name: '我的键位',
+      keys: { KeyU: 'C3', KeyI: 'C#3', KeyO: 'D3' },
+      octaveUp: 'KeyM', octaveDown: 'KeyN'
+    });
+  });
+  const imported = await page.evaluate(async () => {
+    const m = window.ScoreKeymap.fromJSON(window.__KM);
+    applyKeymap(m);
+    return { name: keymap.name, u: keyToMidi.KeyU, o: keyToMidi.KeyO, a: keyToMidi.KeyA, up: keymap.octaveUp };
+  });
+  check('导入自定义键位 JSON 后立刻生效',
+        imported.name === '我的键位' && imported.u === 48 && imported.o === 50 &&
+        imported.a == null && imported.up === 'KeyM', JSON.stringify(imported));
+
+  // 真的用文件选择框导一份进来
+  const fs = require('fs');
+  const path = require('path');
+  const tmpKm = path.join(__dirname, 'fixtures', '键位-自定义.json');
+  fs.writeFileSync(tmpKm, JSON.stringify({
+    name: '文件导入的键位',
+    keys: { KeyG: 'G3', KeyH: 'G#3', KeyJ: 'A3', KeyK: 'A#3', KeyL: 'B3' },
+    octaveDown: 'ArrowLeft', octaveUp: 'ArrowRight'
+  }, null, 2));
+  const input = await page.$('#kmFile');
+  await input.uploadFile(tmpKm);
+  await page.waitForFunction(() => keymap && keymap.name === '文件导入的键位', { timeout: 8000 })
+    .catch(() => {});
+  const fromFile2 = await page.evaluate(() => ({
+    name: keymap.name, g: keyToMidi.KeyG, l: keyToMidi.KeyL, a: keyToMidi.KeyA,
+    saved: !!localStorage.getItem('musicmaker.keymap'),
+  }));
+  check('用「📂 导入键位 JSON」选文件也能改键位',
+        fromFile2.name === '文件导入的键位' && fromFile2.g === 55 && fromFile2.l === 59 &&
+        fromFile2.a == null, JSON.stringify(fromFile2));
+  check('导入的键位会存到浏览器里（刷新不丢）', fromFile2.saved);
+
+  const badKm = await page.evaluate(() => {
+    const m = window.ScoreKeymap.fromJSON(JSON.stringify({
+      name: '写坏的', keys: { keya: 'C4', KeyD: '不是音名', KeyE: 'E4' }, octaveUp: 'KeyX'
+    }));
+    return { warnings: m.warnings, kept: Object.keys(m.keys).length };
+  });
+  check('键位 JSON 写错会有明确提示，而不是静默失效',
+        badKm.warnings.length === 2 && badKm.kept === 1,
+        badKm.kept + ' 个可用 / ' + badKm.warnings.length + ' 条提示');
+
+  const exported = await page.evaluate(() => {
+    const m = window.ScoreKeymap.fromJSON(JSON.stringify({
+      name: '导出测试', keys: { KeyA: 'C4', KeyB: 62 }, octaveUp: 'KeyX', octaveDown: 'KeyZ'
+    }));
+    return window.ScoreKeymap.toJSON(m);
+  });
+  check('导出的键位 JSON 能原样再导入回来（往返一致）', (() => {
+    const back = require('../keymap.js').fromJSON(exported);
+    return back.name === '导出测试' && back.keys.KeyA === 60 && back.keys.KeyB === 62;
+  })(), exported.replace(/\s+/g, ' ').slice(0, 90));
+
+  // 后面的录音测试要用回默认键位
+  await page.evaluate(() => {
+    localStorage.removeItem('musicmaker.keymap');
+    const m = window.ScoreKeymap.materialize(window.ScoreKeymap.DEFAULT);
+    m.custom = false;
+    m.presetId = m.name;
+    applyKeymap(m);
+  });
 
   /* ---------- 5. 完整流程：开始 → 弹 → 暂停（弹了不算） → 继续 → 结束 ---------- */
   // bpm 120 → 1 拍 0.5 秒；量化 1/4 → 每格 1 拍
@@ -130,13 +264,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await page.waitForFunction(() => REC.state === 'rec', { timeout: 30000 });
   const wallStart = Date.now();
 
-  await page.keyboard.down('KeyZ'); await sleep(600); await page.keyboard.up('KeyZ');   // C3
+  await page.keyboard.down('KeyA'); await sleep(600); await page.keyboard.up('KeyA');   // C4
   await sleep(400);
   await page.click('#btnPause');
   const nAtPause = await page.evaluate(() => REC.events.length);
   check('暂停后进入 paused 状态', (await page.evaluate(() => REC.state)) === 'paused');
 
-  await page.keyboard.down('KeyX'); await sleep(500); await page.keyboard.up('KeyX');   // 暂停期间弹，不该被录
+  await page.keyboard.down('KeyD'); await sleep(500); await page.keyboard.up('KeyD');   // 暂停期间弹，不该被录
   await sleep(1000);
   const nWhilePaused = await page.evaluate(() => REC.events.length);
   check('暂停期间弹的音不会被录进去', nAtPause === 1 && nWhilePaused === 1,
@@ -144,7 +278,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   await page.click('#btnResume');
   await sleep(900);
-  await page.keyboard.down('KeyC'); await sleep(600); await page.keyboard.up('KeyC');   // E3
+  await page.keyboard.down('KeyF'); await sleep(600); await page.keyboard.up('KeyF');   // F4
   await sleep(200);
   await page.click('#btnEnd');
   const wallEnd = Date.now();
@@ -156,8 +290,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   }));
   check('结束进入 done 状态', rec.state === 'done', rec.state);
   check('录到两个音（暂停时弹的那个不算）', rec.events.length === 2, JSON.stringify(rec.events));
-  check('音高是 C3(48) 和 E3(52)',
-        rec.events.length === 2 && rec.events[0].midi === 48 && rec.events[1].midi === 52,
+  check('音高是 C4(60) 和 F4(65)',
+        rec.events.length === 2 && rec.events[0].midi === 60 && rec.events[1].midi === 65,
         rec.events.map((e) => e.midi).join(','));
   check('每个音都记下了长度（松手时间 > 按下时间）',
         rec.events.every((e) => e.off > e.on), JSON.stringify(rec.events));
@@ -171,13 +305,19 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   /* ---------- 6. 生成的脚本要干净 ---------- */
   const parsed = await page.evaluate(() => {
-    const p = ScoreParser.parseScore(document.getElementById('out').value);
+    const text = document.getElementById('out').value;
+    const p = ScoreParser.parseScore(text);
+    // 音乐行 = 既不是 title/bpm/time，也不是以冒号结尾的轨道头
+    const music = text.split('\n').map((l) => l.trim()).filter((l) =>
+      l && !/^(title|bpm|time|barlines)\b/i.test(l) && !/:$/.test(l));
     return {
       errors: p.errors, warnings: p.warnings, bpm: p.bpm, timeSig: p.timeSig,
       tracks: p.tracks.map((t) => ({ name: t.name, n: t.notes.length,
         notes: t.notes.map((x) => x.name + '@' + x.beat + ':' + x.durBeats) })),
       totalBeats: p.totalBeats,
-      bars: document.getElementById('out').value.split('\n').filter((l) => l.trim().endsWith('|')).length,
+      musicLines: music.length,
+      lastLineEndsWithBar: music.length > 0 && music[music.length - 1].endsWith('|'),
+      bars: text.split('\n').filter((l) => l.trim().endsWith('|')).length,
     };
   });
   check('生成的脚本没有语法错误', parsed.errors.length === 0, JSON.stringify(parsed.errors.slice(0, 2)));
@@ -186,7 +326,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
         parsed.bpm + ' / ' + parsed.timeSig);
   check('脚本里就是那两个音', parsed.tracks.length === 1 && parsed.tracks[0].n === 2,
         JSON.stringify(parsed.tracks));
-  check('一小节一行（后面用休止符补满）', parsed.bars === 1, parsed.bars + ' 行以 | 结尾');
+  // 断言"每个音乐行都是一整小节、行尾带 |"（末尾用休止符补满），
+  // 而不是断言"只有 1 小节" —— 第二个音落哪一小节取决于真实计时，写死行数会变成脆弱断言
+  check('每个音乐行都是一整小节、行尾带 |（末尾用休止符补满）',
+        parsed.bars >= 1 && parsed.bars === parsed.musicLines && parsed.lastLineEndsWithBar,
+        parsed.bars + ' 个带 | 的行 / ' + parsed.musicLines + ' 个音乐行');
   check('自检通过后下载/工作台按钮可用',
         !(await page.evaluate(() => document.getElementById('btnDownload').disabled)) &&
         !(await page.evaluate(() => document.getElementById('btnOpenBench').disabled)));
@@ -197,7 +341,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     n: REC.events.length, text: document.getElementById('out').value, state: REC.state,
   }));
   check('撤销会去掉最后一个音并重算脚本',
-        afterUndo.n === 1 && /C3/.test(afterUndo.text) && !/E3/.test(afterUndo.text), afterUndo.n + ' 个音');
+        afterUndo.n === 1 && /C4/.test(afterUndo.text) && !/F4/.test(afterUndo.text), afterUndo.n + ' 个音');
 
   await page.click('#btnClear');
   check('清空后回到待机、脚本清空',
@@ -251,7 +395,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   /* ---------- 10. 干净 ---------- */
   const br = badReqs.filter((u) => !/favicon/i.test(u));
-  check('无资源加载失败（含 audio.js / recorder.js）', br.length === 0, JSON.stringify(br.slice(0, 3)));
+  check('无资源加载失败（含 audio.js / recorder.js / keymap.js / keymap.json）',
+        br.length === 0, JSON.stringify(br.slice(0, 3)));
   check('无未捕获 JS 异常', errs.length === 0, JSON.stringify(errs.slice(0, 3)));
 
   await browser.close();
