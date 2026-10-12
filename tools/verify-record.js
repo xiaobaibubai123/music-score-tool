@@ -37,24 +37,37 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await page.goto(PAGE, { waitUntil: 'networkidle2', timeout: 30000 });
 
   /* ---------- 1. 页面结构 ---------- */
-  const shape = await page.evaluate(() => ({
-    keys: document.querySelectorAll('.key').length,
-    white: document.querySelectorAll('.key.white').length,
-    black: document.querySelectorAll('.key.black').length,
-    kb: document.querySelectorAll('.key.kb').length,
-    tags: Array.prototype.map.call(document.querySelectorAll('.key.kb .tag'), (e) => e.textContent).join(''),
-    grids: Array.prototype.map.call(document.getElementById('grid').options, (o) => o.value),
-    btns: ['btnStart', 'btnPause', 'btnResume', 'btnEnd'].map((id) => document.getElementById(id).textContent.trim()),
-    startEnabled: !document.getElementById('btnStart').disabled,
-    pauseEnabled: !document.getElementById('btnPause').disabled,
-    kmName: (typeof keymap !== 'undefined') ? keymap.name : '',
-    kmCount: (typeof keymap !== 'undefined') ? Object.keys(keymap.keys).length : 0,
-    keyToMidi: (typeof keyToMidi !== 'undefined') ? keyToMidi : {},
-    presets: Array.prototype.map.call(document.getElementById('kmPreset').options, (o) => o.value),
-  }));
-  check('琴键都画出来了（C2–C7，36 白 25 黑）',
-        shape.keys === 61 && shape.white === 36 && shape.black === 25,
-        '共 ' + shape.keys + ' 键 / 白 ' + shape.white + ' / 黑 ' + shape.black);
+  const shape = await page.evaluate(() => {
+    const p = document.getElementById('piano');
+    const midis = Array.prototype.map.call(p.querySelectorAll('.key'), (e) => +e.dataset.midi);
+    return {
+      keys: midis.length,
+      white: p.querySelectorAll('.key.white').length,
+      black: p.querySelectorAll('.key.black').length,
+      firstMidi: Math.min.apply(null, midis),
+      lastMidi: Math.max.apply(null, midis),
+      kb: p.querySelectorAll('.key.kb').length,
+      tags: Array.prototype.map.call(p.querySelectorAll('.key.kb .tag'), (e) => e.textContent).join(''),
+      hasOctBtns: !!document.getElementById('octUp') || !!document.getElementById('octDown'),
+      scrollable: p.scrollWidth > p.clientWidth + 1,
+      grids: Array.prototype.map.call(document.getElementById('grid').options, (o) => o.value),
+      btns: ['btnStart', 'btnPause', 'btnResume', 'btnEnd'].map((id) => document.getElementById(id).textContent.trim()),
+      startEnabled: !document.getElementById('btnStart').disabled,
+      pauseEnabled: !document.getElementById('btnPause').disabled,
+      kmName: (typeof keymap !== 'undefined') ? keymap.name : '',
+      kmCount: (typeof keymap !== 'undefined') ? keymap.binds.length : -1,
+      keyToMidi: (typeof keyToMidi !== 'undefined') ? keyToMidi : {},
+      rows: document.querySelectorAll('#kmTable tbody tr').length,
+      presets: document.getElementById('kmPreset').options.length,
+    };
+  });
+  check('整台钢琴都在一屏里（A0–C8，88 键 / 52 白 / 36 黑）',
+        shape.keys === 88 && shape.white === 52 && shape.black === 36 &&
+        shape.firstMidi === 21 && shape.lastMidi === 108,
+        '共 ' + shape.keys + ' 键 / 白 ' + shape.white + ' / 黑 ' + shape.black +
+        ' / ' + shape.firstMidi + '–' + shape.lastMidi);
+  check('没有"升八度 / 降八度"这种会把琴键挪走的按钮',
+        !shape.hasOctBtns, shape.hasOctBtns ? '按钮还在' : '已移除');
   check('四个控制键都在（开始 / 暂停 / 继续 / 结束）',
         shape.btns.length === 4 && /开始/.test(shape.btns[0]) && /暂停/.test(shape.btns[1]) &&
         /继续/.test(shape.btns[2]) && /结束/.test(shape.btns[3]), shape.btns.join(' | '));
@@ -64,14 +77,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check('琴键上直接标出"按哪个键"（A S D F …）',
         shape.kb === 18 && /A/.test(shape.tags) && /S/.test(shape.tags) && /D/.test(shape.tags),
         shape.kb + ' 个键有标记：' + shape.tags);
+  check('键位表在页面上是可编辑的（18 行）', shape.rows === 18, shape.rows + ' 行');
 
   /* ---------- 1.5 默认键位 = 通用"键盘钢琴"主键区 ---------- */
   const D = await page.evaluate(() => ({
     A: keyToMidi.KeyA, S: keyToMidi.KeyS, D: keyToMidi.KeyD, F: keyToMidi.KeyF,
     H: keyToMidi.KeyH, J: keyToMidi.KeyJ, K: keyToMidi.KeyK,
     W: keyToMidi.KeyW, E: keyToMidi.KeyE, semicolon: keyToMidi.Semicolon,
-    z: keyToMidi.KeyZ, x: keyToMidi.KeyX,
-    up: keymap.octaveUp, down: keymap.octaveDown,
+    z: keyToMidi.KeyZ,
+    binds: keymap.binds.length,
     presetCount: document.getElementById('kmPreset').options.length,
   }));
   check('默认是"键盘主键区"：A S D F G H J K L ; 就是 do re mi fa sol la si do re mi',
@@ -79,8 +93,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
         D.J === 71 && D.K === 72 && D.semicolon === 76,
         'A=' + D.A + ' S=' + D.S + ' D=' + D.D + ' F=' + D.F + ' H=' + D.H + ' J=' + D.J + ' K=' + D.K + ' ;=' + D.semicolon);
   check('白键上一排就是黑键（W E → C#4 D#4）', D.W === 61 && D.E === 63, 'W=' + D.W + ' E=' + D.E);
-  check('Z / X 当换八度，不再占音符', D.z == null && D.x == null && D.up === 'KeyX' && D.down === 'KeyZ',
-        'Z=' + D.z + ' X=' + D.x + ' up=' + D.up);
+  check('Z 不再是"换八度"，也不占音符（没有运行时移调）', D.z == null, 'Z=' + D.z);
   check('内置了多个预设可选', D.presetCount >= 3, D.presetCount + ' 个预设');
 
   /* ---------- 2. 和乐谱工作台共用同一份音源 ---------- */
@@ -142,64 +155,117 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check('敲 A 键会按下 C4（琴键亮起）', held.on && held.pressed === 1, JSON.stringify(held));
   check('松手后琴键熄灭', !released.on && released.pressed === 0, JSON.stringify(released));
 
-  const oct = await page.evaluate(() => ({ shift: octaveShift }));
-  await page.keyboard.down('KeyX'); await page.keyboard.up('KeyX');       // 键位表指定的升八度
-  const oct2 = await page.evaluate(() => ({ shift: octaveShift }));
-  await page.keyboard.down('KeyZ'); await page.keyboard.up('KeyZ');
-  const oct3 = await page.evaluate(() => ({ shift: octaveShift }));
-  check('Z / X 能换八度', oct.shift === 0 && oct2.shift === 12 && oct3.shift === 0,
-        oct.shift + ' → ' + oct2.shift + ' → ' + oct3.shift);
+  /* ---------- 4.5 在页面上直接改键位 ---------- */
+  // 钢琴不会被"挪走"：按下键前后，整台琴的 DOM 位置一模一样
+  const before = await page.evaluate(() => document.getElementById('piano').innerHTML.length);
+  await page.keyboard.down('KeyD'); await page.keyboard.up('KeyD');
+  const after = await page.evaluate(() => document.getElementById('piano').innerHTML.length);
+  check('按键不会让钢琴重画/位移（整台琴始终在那儿）', before === after, before + ' → ' + after);
 
-  await page.keyboard.press('ArrowRight');
-  const oct4 = await page.evaluate(() => ({ shift: octaveShift, a: keyToMidi.KeyA }));
-  await page.keyboard.press('ArrowLeft');
-  const oct5 = await page.evaluate(() => ({ shift: octaveShift, a: keyToMidi.KeyA }));
-  check('← → 也能换八度（不管键位表怎么写）',
-        oct4.shift === 12 && oct4.a === 72 && oct5.shift === 0 && oct5.a === 60,
-        '升八度后 A=' + oct4.a + '，回来=' + oct5.a);
-
-  const oct6 = await page.evaluate(() => {
-    document.getElementById('octUp').click();
-    const up = octaveShift;
-    document.getElementById('octDown').click();
-    return { up: up, back: octaveShift };
+  // 点表格里 C4 那一行的按键，再按 Q —— 应该改绑到 Q，A 随之空出来
+  await page.evaluate(() => {
+    const rows = document.querySelectorAll('#kmTable tbody tr');
+    const row = Array.prototype.filter.call(rows, (r) => r.cells[0].textContent === 'C4')[0];
+    row.cells[1].querySelector('button').click();          // 进入"请按一个键…"
   });
-  check('面板上的「音区升高 / 降低」按钮也管用', oct6.up === 12 && oct6.back === 0,
-        oct6.up + ' → ' + oct6.back);
+  const edited = await page.evaluate(() => {
+    const rows = document.querySelectorAll('#kmTable tbody tr');
+    const row = Array.prototype.filter.call(rows, (r) => r.cells[0].textContent === 'C4')[0];
+    return { capturing: !!capturing, label: row ? row.cells[1].textContent.trim() : '(没这行)' };
+  });
+  await page.keyboard.press('KeyQ');
+  await sleep(60);
+  const afterEdit = await page.evaluate(() => ({
+    c4: keyToMidi.KeyQ, a: keyToMidi.KeyA, csharp4: keyToMidi.KeyW,
+    binds: keymap.binds.length, conflicts: window.ScoreKeymap.conflicts(keymap).length,
+    saved: !!localStorage.getItem('musicmaker.keymap'),
+    // 录键位的时候按下的那个键不该顺便弹出个音来
+    pressed: pressed.size,
+  }));
+  check('点行里的按键 → 按一个键 → 立刻改绑',
+        edited.capturing && /请按一个键/.test(edited.label) &&
+        afterEdit.c4 === 60 && afterEdit.a == null && afterEdit.csharp4 === 61 &&
+        afterEdit.binds === 18 && afterEdit.conflicts === 0,
+        JSON.stringify({ edited, afterEdit }));
+  check('录键位时按下的键不会顺便弹出一个音', afterEdit.pressed === 0, '按住的音数 ' + afterEdit.pressed);
+  check('页面上改的键位也会存下来', afterEdit.saved);
 
-  /* ---------- 4.5 换键位：预设 + 导入 JSON ---------- */
+  // 抢一个已经被别的音占着的键 → 从旧主人身上摘掉，不留下冲突
+  await page.evaluate(() => {
+    const rows = document.querySelectorAll('#kmTable tbody tr');
+    const row = Array.prototype.filter.call(rows, (r) => r.cells[0].textContent === 'C4')[0];
+    row.cells[1].querySelector('button').click();
+  });
+  await page.keyboard.press('KeyW');                        // W 本来是 C#4
+  const steal = await page.evaluate(() => ({
+    c4: keyToMidi.KeyW, hasCsharp: keymap.binds.some((b) => b.midi === 61),
+    binds: keymap.binds.length, rows: document.querySelectorAll('#kmTable tbody tr').length,
+    conflicts: window.ScoreKeymap.conflicts(keymap).length,
+  }));
+  check('抢一个已被占用的键，会把它从旧主人身上摘掉（不留下冲突）',
+        steal.c4 === 60 && !steal.hasCsharp && steal.binds === 17 && steal.conflicts === 0,
+        JSON.stringify(steal));
+
+  // 删掉一条
+  const del = await page.evaluate(() => {
+    const rows = document.querySelectorAll('#kmTable tbody tr');
+    const row = Array.prototype.filter.call(rows, (r) => r.cells[0].textContent === 'C4')[0];
+    row.cells[2].querySelector('button').click();
+    return { binds: keymap.binds.length, hasC4: keymap.binds.some((b) => b.midi === 60),
+             rows: document.querySelectorAll('#kmTable tbody tr').length };
+  });
+  check('点 ✕ 能删掉一条绑定', del.binds === 16 && !del.hasC4 && del.rows === 16, JSON.stringify(del));
+
+  /* ---------- 4.6 冲突要标红 ---------- */
+  const conflictUI = await page.evaluate(() => {
+    applyKeymap(window.ScoreKeymap.fromJSON(JSON.stringify({
+      name: '有冲突的键位', notes: { C4: 'KeyA', D4: 'KeyA', E4: 'KeyD' }
+    })));
+    const bad = document.querySelectorAll('#kmTable tbody tr.bad').length;
+    const msgs = document.querySelectorAll('#kmWarn .msg').length;
+    const first = document.querySelector('#kmWarn .msg');
+    return { bad, msgs, text: first ? first.textContent : '', cls: first ? first.className : '',
+             hasFix: !!(first && first.querySelector('button')),
+             conflicts: window.ScoreKeymap.conflicts(keymap).length };
+  });
+  check('同一个键绑给两个音 → 两行都标红',
+        conflictUI.conflicts === 1 && conflictUI.bad === 2 && conflictUI.msgs >= 1,
+        JSON.stringify(conflictUI));
+  check('红色的冲突提示写清了是哪个键、哪两个音',
+        /冲突/.test(conflictUI.text) && /KeyA|A/.test(conflictUI.text) &&
+        /C4/.test(conflictUI.text) && /D4/.test(conflictUI.text) && /red|msg/.test(conflictUI.cls),
+        conflictUI.text.slice(0, 60));
+
+  const fixed = await page.evaluate(() => {
+    document.querySelector('#kmWarn .msg button').click();     // 「只保留 C4」
+    return { conflicts: window.ScoreKeymap.conflicts(keymap).length,
+             bad: document.querySelectorAll('#kmTable tbody tr.bad').length,
+             c4: keyToMidi.KeyA, d4: keyToMidi.KeyA };
+  });
+  check('冲突提示上的一键修复能消掉红色', fixed.conflicts === 0 && fixed.bad === 0, JSON.stringify(fixed));
+
+  /* ---------- 4.7 预设 / 导入 / 导出 ---------- */
   const presetSwitch = await page.evaluate(() => {
     const sel = document.getElementById('kmPreset');
     sel.value = '双排两个八度（DAW / 电钢风格）';
     sel.dispatchEvent(new Event('change'));
-    return { name: keymap.name, z: keyToMidi.KeyZ, a: keyToMidi.KeyA, q: keyToMidi.KeyQ, up: keymap.octaveUp };
+    return { name: keymap.name, z: keyToMidi.KeyZ, a: keyToMidi.KeyA, q: keyToMidi.KeyQ,
+             conflicts: window.ScoreKeymap.conflicts(keymap).length };
   });
   check('切到「双排两个八度」预设后，Z 变成 C3、A 不再绑音',
         /双排/.test(presetSwitch.name) && presetSwitch.z === 48 && presetSwitch.a == null &&
-        presetSwitch.q === 60 && presetSwitch.up === 'ArrowRight',
-        JSON.stringify(presetSwitch));
+        presetSwitch.q === 60 && presetSwitch.conflicts === 0, JSON.stringify(presetSwitch));
 
-  // 页面上直接改键位 JSON 文本再导入
-  await page.evaluate(() => {
-    const sel = document.getElementById('kmPreset');
-    sel.value = '键盘钢琴（通用主键区）';
-    sel.dispatchEvent(new Event('change'));
-  });
-  await page.evaluate(() => {
-    window.__KM = JSON.stringify({
-      name: '我的键位',
-      keys: { KeyU: 'C3', KeyI: 'C#3', KeyO: 'D3' },
-      octaveUp: 'KeyM', octaveDown: 'KeyN'
-    });
-  });
+  // 音符当 key、按键当 value —— 就是用户要的那种写法
   const imported = await page.evaluate(async () => {
-    const m = window.ScoreKeymap.fromJSON(window.__KM);
-    applyKeymap(m);
-    return { name: keymap.name, u: keyToMidi.KeyU, o: keyToMidi.KeyO, a: keyToMidi.KeyA, up: keymap.octaveUp };
+    applyKeymap(window.ScoreKeymap.fromJSON(JSON.stringify({
+      name: '我的键位', notes: { 'C3': 'KeyU', 'C#3': 'KeyI', 'D3': 'KeyO' }
+    })));
+    return { name: keymap.name, u: keyToMidi.KeyU, o: keyToMidi.KeyO, a: keyToMidi.KeyA };
   });
-  check('导入自定义键位 JSON 后立刻生效',
+  check('导入 {"音符": "按键"} 形式的 JSON 后立刻生效',
         imported.name === '我的键位' && imported.u === 48 && imported.o === 50 &&
-        imported.a == null && imported.up === 'KeyM', JSON.stringify(imported));
+        imported.a == null, JSON.stringify(imported));
 
   // 真的用文件选择框导一份进来
   const fs = require('fs');
@@ -207,8 +273,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const tmpKm = path.join(__dirname, 'fixtures', '键位-自定义.json');
   fs.writeFileSync(tmpKm, JSON.stringify({
     name: '文件导入的键位',
-    keys: { KeyG: 'G3', KeyH: 'G#3', KeyJ: 'A3', KeyK: 'A#3', KeyL: 'B3' },
-    octaveDown: 'ArrowLeft', octaveUp: 'ArrowRight'
+    notes: { 'G3': 'KeyG', 'G#3': 'KeyH', 'A3': 'KeyJ', 'A#3': 'KeyK', 'B3': 'KeyL' }
   }, null, 2));
   const input = await page.$('#kmFile');
   await input.uploadFile(tmpKm);
@@ -217,17 +282,18 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const fromFile2 = await page.evaluate(() => ({
     name: keymap.name, g: keyToMidi.KeyG, l: keyToMidi.KeyL, a: keyToMidi.KeyA,
     saved: !!localStorage.getItem('musicmaker.keymap'),
+    rows: document.querySelectorAll('#kmTable tbody tr').length,
   }));
   check('用「📂 导入键位 JSON」选文件也能改键位',
         fromFile2.name === '文件导入的键位' && fromFile2.g === 55 && fromFile2.l === 59 &&
-        fromFile2.a == null, JSON.stringify(fromFile2));
+        fromFile2.a == null && fromFile2.rows === 5, JSON.stringify(fromFile2));
   check('导入的键位会存到浏览器里（刷新不丢）', fromFile2.saved);
 
   const badKm = await page.evaluate(() => {
     const m = window.ScoreKeymap.fromJSON(JSON.stringify({
-      name: '写坏的', keys: { keya: 'C4', KeyD: '不是音名', KeyE: 'E4' }, octaveUp: 'KeyX'
+      name: '写坏的', notes: { 'keya': 'KeyX', 'D4': '不是键', 'E4': 'KeyE' }
     }));
-    return { warnings: m.warnings, kept: Object.keys(m.keys).length };
+    return { warnings: m.warnings, kept: m.binds.length };
   });
   check('键位 JSON 写错会有明确提示，而不是静默失效',
         badKm.warnings.length === 2 && badKm.kept === 1,
@@ -235,13 +301,17 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   const exported = await page.evaluate(() => {
     const m = window.ScoreKeymap.fromJSON(JSON.stringify({
-      name: '导出测试', keys: { KeyA: 'C4', KeyB: 62 }, octaveUp: 'KeyX', octaveDown: 'KeyZ'
+      name: '导出测试', notes: { 'C4': 'KeyA', 'D4': 'KeyS' }
     }));
     return window.ScoreKeymap.toJSON(m);
   });
+  check('导出的 JSON 是「音符当 key、按键当 value」',
+        (() => { const o = JSON.parse(exported); return o.notes && o.notes.C4 === 'KeyA' && o.notes.D4 === 'KeyS'; })(),
+        exported.replace(/\s+/g, ' ').slice(0, 80));
   check('导出的键位 JSON 能原样再导入回来（往返一致）', (() => {
     const back = require('../keymap.js').fromJSON(exported);
-    return back.name === '导出测试' && back.keys.KeyA === 60 && back.keys.KeyB === 62;
+    return back.name === '导出测试' && back.binds.length === 2 &&
+           back.binds[0].midi === 60 && back.binds[0].code === 'KeyA';
   })(), exported.replace(/\s+/g, ' ').slice(0, 90));
 
   // 后面的录音测试要用回默认键位

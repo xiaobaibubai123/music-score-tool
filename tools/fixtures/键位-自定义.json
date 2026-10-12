@@ -1,12 +1,10 @@
 {
   "name": "文件导入的键位",
-  "keys": {
-    "KeyG": "G3",
-    "KeyH": "G#3",
-    "KeyJ": "A3",
-    "KeyK": "A#3",
-    "KeyL": "B3"
-  },
-  "octaveDown": "ArrowLeft",
-  "octaveUp": "ArrowRight"
+  "notes": {
+    "G3": "KeyG",
+    "G#3": "KeyH",
+    "A3": "KeyJ",
+    "A#3": "KeyK",
+    "B3": "KeyL"
+  }
 }
