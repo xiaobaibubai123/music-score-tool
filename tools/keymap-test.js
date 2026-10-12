@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 键位表 单元测试。
  *
  * 被测的 ../keymap.js 就是 record.html 里跑的那一份。
@@ -9,7 +9,7 @@
  *
  *   node keymap-test.js
  */
-const K = require('../keymap.js');
+const K = require('../src/keymap.js');
 
 let fails = 0;
 const ok = (n, c, d) => { if (!c) fails++; console.log((c ? 'PASS ' : 'FAIL ') + n + (d !== undefined ? '  :: ' + d : '')); };
@@ -283,7 +283,7 @@ ok('looksLikeCode("KeyA") = true', K.looksLikeCode('KeyA') === true);
 {
   const fs = require('fs');
   const path = require('path');
-  const p = path.join(__dirname, '..', 'keymap.json');
+  const p = path.join(__dirname, '..', 'config', 'keymap.json');
   ok('仓库里有 keymap.json', fs.existsSync(p), p);
   if (fs.existsSync(p)) {
     const raw = fs.readFileSync(p, 'utf8');

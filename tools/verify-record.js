@@ -186,6 +186,17 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const after = await page.evaluate(() => document.getElementById('piano').innerHTML.length);
   check('按键不会让钢琴重画/位移', before === after, before + ' → ' + after);
 
+  // Z / X 换音区（快捷键，和按钮等效）
+  await page.keyboard.press('KeyX');
+  const zxUp = await page.evaluate(() => ({ a: keyToMidi.KeyA, lo: +document.querySelector('.key').dataset.midi,
+                                            reg: document.getElementById('kbRange').textContent }));
+  await page.keyboard.press('KeyZ');
+  const zxDown = await page.evaluate(() => ({ a: keyToMidi.KeyA, lo: +document.querySelector('.key').dataset.midi }));
+  check('按 X 升一组、按 Z 降一组（和按钮等效）',
+        zxUp.a === 72 && zxUp.lo === 72 && /C5 组/.test(zxUp.reg) &&
+        zxDown.a === 60 && zxDown.lo === 60,
+        JSON.stringify({ zxUp, zxDown }));
+
   // 点表格里 C4 那一行的按键，再按 Q —— 应该改绑到 Q，A 随之空出来
   await page.evaluate(() => {
     const rows = document.querySelectorAll('#kmTable tbody tr');
@@ -333,10 +344,45 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
         (() => { const o = JSON.parse(exported); return o.notes && o.notes.C4 === 'KeyA' && o.notes.D4 === 'KeyS'; })(),
         exported.replace(/\s+/g, ' ').slice(0, 80));
   check('导出的键位 JSON 能原样再导入回来（往返一致）', (() => {
-    const back = require('../keymap.js').fromJSON(exported);
+    const back = require('../src/keymap.js').fromJSON(exported);
     return back.name === '导出测试' && back.binds.length === 2 &&
            back.binds[0].midi === 60 && back.binds[0].code === 'KeyA';
   })(), exported.replace(/\s+/g, ' ').slice(0, 90));
+
+  /* ---------- 4.8 快捷键：Ctrl 暂停 / 继续 ---------- */
+  await page.evaluate(() => {
+    document.getElementById('chkCountin').checked = false;
+    document.getElementById('bpm').value = '120';
+  });
+  await page.click('#btnStart');
+  await page.waitForFunction(() => REC.state === 'rec', { timeout: 30000 });
+  await page.keyboard.down('Control'); await page.keyboard.up('Control');
+  const ctrl1 = await page.evaluate(() => REC.state);
+  await page.keyboard.down('Control'); await page.keyboard.up('Control');
+  const ctrl2 = await page.evaluate(() => REC.state);
+  check('录音时按一下 Ctrl 暂停、再按一下继续', ctrl1 === 'paused' && ctrl2 === 'rec',
+        ctrl1 + ' → ' + ctrl2);
+
+  // Ctrl+C 这种组合键不能被误当成"按了一下 Ctrl"
+  await page.keyboard.down('Control');
+  await page.keyboard.press('KeyC');
+  await page.keyboard.up('Control');
+  await sleep(80);
+  const ctrl3 = await page.evaluate(() => REC.state);
+  check('Ctrl+C 不会被误当成暂停/继续', ctrl3 === 'rec', ctrl3);
+  await page.click('#btnEnd');
+
+  // 键位表把 Z 绑成音符之后：以用户绑的为准，不再换音区
+  const zBound = await page.evaluate(() => {
+    applyKeymap(window.ScoreKeymap.setBinding(keymap, 48, 'KeyZ'));
+    return { z: keyToMidi.KeyZ };
+  });
+  await page.keyboard.down('KeyZ');
+  await sleep(80);
+  const zPlay = await page.evaluate(() => ({ held: pressed.size }));
+  await page.keyboard.up('KeyZ');
+  check('Z 被键位表绑成音符后，按 Z 是弹那个音，而不是换音区',
+        zBound.z === 48 && zPlay.held === 1, JSON.stringify({ zBound, zPlay }));
 
   // 后面的录音测试要用回默认键位
   await page.evaluate(() => {

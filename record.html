@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -126,13 +126,17 @@
   <h2>1 · 录音控制</h2>
   <div class="row">
     <button class="rec" id="btnStart">⏺ 开始录音</button>
-    <button id="btnPause">⏸ 暂停</button>
-    <button id="btnResume">▶ 继续</button>
+    <button id="btnPause" title="快捷键：Ctrl">⏸ 暂停</button>
+    <button id="btnResume" title="快捷键：Ctrl">▶ 继续</button>
     <button id="btnEnd">⏹ 结束并生成乐谱</button>
     <span style="flex:1"></span>
     <button id="btnUndo">↶ 撤销上一个音</button>
     <button id="btnReplay">🔊 回放我弹的</button>
     <button id="btnClear">🗑 清空重录</button>
+  </div>
+  <div class="mono" style="margin-top:6px">
+    快捷键：录音时按 <kbd>Ctrl</kbd> 暂停 / 继续 ·
+    <kbd>Z</kbd> 降一组 · <kbd>X</kbd> 升一组
   </div>
   <div class="row">
     <span class="mono">速度</span><input type="number" id="bpm" min="30" max="240" step="1" value="90" style="width:74px"><span class="mono">BPM</span>
@@ -160,8 +164,8 @@
 <div class="panel">
   <h2>2 · 弹吧（鼠标点 / 键盘敲 / 手机上直接按）</h2>
   <div class="row" style="margin:0 0 8px">
-    <button id="octDown">◀ 降一组</button>
-    <button id="octUp">升一组 ▶</button>
+    <button id="octDown" title="快捷键：Z">◀ 降一组 <kbd>Z</kbd></button>
+    <button id="octUp" title="快捷键：X">升一组 ▶ <kbd>X</kbd></button>
     <span class="regbadge" id="kbRange">—</span>
     <button id="btnPanic">✋ 全部松开</button>
   </div>
@@ -178,7 +182,7 @@
     <button id="btnKmLoad">📂 导入键位 JSON</button>
     <input type="file" id="kmFile" accept=".json,application/json" hidden>
     <button id="btnKmSave">⬇ 导出当前键位</button>
-    <a class="btnlike" href="keymap.json" download="keymap.json">⬇ 默认 keymap.json</a>
+    <a class="btnlike" href="config/keymap.json" download="keymap.json">⬇ 默认 keymap.json</a>
     <button id="btnKmReset">↺ 恢复默认</button>
   </div>
   <div class="row">
@@ -233,10 +237,10 @@
   </div>
 </div>
 
-<script src="parser.js"></script>
-<script src="audio.js"></script>
-<script src="recorder.js"></script>
-<script src="keymap.js"></script>
+<script src="src/parser.js"></script>
+<script src="src/audio.js"></script>
+<script src="src/recorder.js"></script>
+<script src="src/keymap.js"></script>
 <script>
 "use strict";
 /* ============================================================
@@ -413,9 +417,22 @@ function renderRegister() { $('kbRange').innerHTML = registerHTML(); }
    没有"换八度"这种运行时偏移：整台琴都在屏幕上，要换音区就改键位表
    （面板上有「整组 ↑/↓ 八度」一键移调，那是真的改每一条，导出的 JSON 也会跟着变）。 */
 const isTyping = (e) => e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);
+/* 录键位时不许把纯修饰键绑成音符：Ctrl 要当暂停/继续，Shift/Alt 之类也只会添乱 */
+const MODIFIER_CODES = ['ControlLeft', 'ControlRight', 'ShiftLeft', 'ShiftRight',
+                        'AltLeft', 'AltRight', 'MetaLeft', 'MetaRight'];
+let ctrlArmed = false;            // Ctrl 按下去了
+let ctrlUsedAsModifier = false;   // 这轮 Ctrl 期间按过别的键（说明是在用组合键）
 
 window.addEventListener('keydown', (e) => {
   if (capturing) return;                       // 正在录键位，交给捕获逻辑
+  /* Ctrl 单独按 = 暂停/继续。
+     麻烦在于"按 Ctrl"和"按 Ctrl+C"在 keydown 时长得一样，所以这里只做标记，
+     真正触发放在 keyup：如果这一轮 Ctrl 期间按过别的键，就当组合键处理，不触发。 */
+  if (e.code === 'ControlLeft' || e.code === 'ControlRight') {
+    if (!e.repeat) { ctrlArmed = true; ctrlUsedAsModifier = false; }
+    return;
+  }
+  if (ctrlArmed && (e.ctrlKey || e.metaKey)) ctrlUsedAsModifier = true;
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (isTyping(e)) return;
   const midi = keyToMidi[e.code];
@@ -426,16 +443,33 @@ window.addEventListener('keydown', (e) => {
     noteOn(midi, 0.85);
     return;
   }
-  // 没绑到音符的：空格别把页面滚下去，其余不管（←→ 之类现在不做任何事）
+  /* 快捷键 Z / X：只有这个键【没有】被键位表绑成音符时才生效 ——
+     用户明确把 Z 绑成某个音的时候，当然以他自己绑的为准。 */
+  if (e.code === 'KeyZ') { e.preventDefault(); shiftGroup(-1); return; }
+  if (e.code === 'KeyX') { e.preventDefault(); shiftGroup(1); return; }
+  // 没绑到音符的：空格别把页面滚下去，其余不管
   if (e.code === 'Space') e.preventDefault();
 });
 window.addEventListener('keyup', (e) => {
+  if (e.code === 'ControlLeft' || e.code === 'ControlRight') {
+    const alone = ctrlArmed && !ctrlUsedAsModifier && !e.ctrlKey;   // 松开时 ctrlKey 已经是 false
+    ctrlArmed = false;
+    if (alone) toggleRecPause();
+    return;
+  }
   const midi = kbHeld.get(e.code);
   if (midi == null) return;
   kbHeld.delete(e.code);
   noteOff(midi);
 });
-window.addEventListener('blur', () => releaseAll());
+window.addEventListener('blur', () => { ctrlArmed = false; releaseAll(); });
+
+/** Ctrl：在"录音中 / 已暂停"之间切换 */
+function toggleRecPause() {
+  if (REC.state === 'rec') doPause();
+  else if (REC.state === 'paused') doResume();
+  else setStatus('（先按「⏺ 开始录音」，录音时按 Ctrl 就能暂停 / 继续）');
+}
 
 /* ============================================================
    5. 钢琴键盘：一次只画"一组"（C 到下一个 C），用 ◀ ▶ 升降换组
@@ -1001,6 +1035,10 @@ window.addEventListener('keydown', (e) => {
     setStatus('已取消，键位没动');
     return;
   }
+  if (MODIFIER_CODES.indexOf(e.code) >= 0) {
+    setStatus('⚠ Ctrl / Shift / Alt 不能当音符键（Ctrl 还要用来暂停录音），请按别的键', 'warn');
+    return;
+  }
   const midi = capturing.midi;
   capturing = null;
   const old = keymap.binds.filter((b) => b.code === e.code && b.midi !== midi)[0];
@@ -1049,7 +1087,7 @@ function loadSavedKeymap() {
 async function loadKeymapFile() {
   // keymap.json 放在仓库根目录，直接改它 + 刷新页面就能生效
   try {
-    const r = await fetch('keymap.json', { cache: 'no-cache' });
+    const r = await fetch('config/keymap.json', { cache: 'no-cache' });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const m = Keymap.fromJSON(await r.text());
     m.presetId = Keymap.PRESETS.some((p) => p.name === m.name) ? m.name : '';

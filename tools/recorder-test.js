@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 录音 → 乐谱脚本 的单元测试。
  *
  * 被测的 ../recorder.js 就是 record.html 里跑的那一份（浏览器里挂 window.ScoreRecorder），
@@ -6,8 +6,8 @@
  *
  *   node recorder-test.js
  */
-const { parseScore, formatScore } = require('../parser.js');
-const R = require('../recorder.js');
+const { parseScore, formatScore } = require('../src/parser.js');
+const R = require('../src/recorder.js');
 const { build, quantize, durSuffix, tpbOf, beatsPerBarOf, GRIDS } = R;
 
 let fails = 0;

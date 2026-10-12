@@ -3,9 +3,12 @@
  *
  *   node build-dist.js
  *
- * 产物结构（自包含，不依赖 node_modules，全部相对路径）：
- *   dist/index.html     乐谱工作台（唯一页面）
- *   dist/vendor/*.js    Tone.js + @tonejs/midi + lamejs（本地化）
+ * 产物结构和仓库保持一致（自包含，不依赖 node_modules，全部相对路径）：
+ *   dist/index.html      乐谱工作台（入口，必须在根目录，否则 http://host/ 打不开）
+ *   dist/record.html     演奏录音页（入口）
+ *   dist/src/*.js        应用代码
+ *   dist/config/keymap.json  键位配置
+ *   dist/vendor/*.js     第三方库（Tone.js + @tonejs/midi + lamejs）
  *   dist/assets/demo.mid 内置示例
  *
  * 上传 dist/ 里的【内容】到网站根目录即可；放在子目录（如 GitHub Pages 的 /repo/）也能用，
@@ -17,9 +20,8 @@ const path = require('path');
 const ROOT = __dirname;
 const DIST = path.join(ROOT, 'dist');
 
-const FILES = ['index.html', 'record.html', 'parser.js', 'audio.js', 'recorder.js',
-               'keymap.js', 'keymap.json'];
-const DIRS = ['vendor', 'assets'];
+const PAGES = ['index.html', 'record.html'];      // 入口页必须留在根目录
+const DIRS = ['src', 'config', 'vendor', 'assets'];
 
 function copyDir(from, to) {
   fs.mkdirSync(to, { recursive: true });
@@ -52,7 +54,7 @@ function checkNoAbsolutePaths(file) {
 function main() {
   // 源头就检查一遍，别把问题带到 dist
   const srcBad = [];
-  FILES.forEach(f => checkNoAbsolutePaths(path.join(ROOT, f))
+  PAGES.forEach(f => checkNoAbsolutePaths(path.join(ROOT, f))
     .forEach(p => srcBad.push(f + ' → ' + p)));
   if (srcBad.length) {
     console.error('✖ 源文件里还有绝对路径，部署到子目录会 404：');
@@ -60,7 +62,9 @@ function main() {
     process.exit(1);
   }
 
-  const required = ['vendor/Tone.js', 'vendor/Midi.js', 'vendor/lame.min.js',
+  const required = ['src/parser.js', 'src/audio.js', 'src/recorder.js', 'src/keymap.js',
+                    'config/keymap.json',
+                    'vendor/Tone.js', 'vendor/Midi.js', 'vendor/lame.min.js',
                     'vendor/piano/A0.mp3', 'vendor/piano/C4.mp3', 'vendor/piano/C8.mp3',
                     'assets/demo.mid'];
   const missing = required.filter(r => !fs.existsSync(path.join(ROOT, r)));
@@ -80,8 +84,32 @@ function main() {
 
   fs.rmSync(DIST, { recursive: true, force: true });
   fs.mkdirSync(DIST, { recursive: true });
-  FILES.forEach(f => fs.copyFileSync(path.join(ROOT, f), path.join(DIST, f)));
+  PAGES.forEach(f => fs.copyFileSync(path.join(ROOT, f), path.join(DIST, f)));
   DIRS.forEach(d => copyDir(path.join(ROOT, d), path.join(DIST, d)));
+
+  // 页面里引用的东西必须真的在 dist 里（挪目录最容易漏的就是这个）
+  const distFiles = new Set(walk(DIST).map(f => f.split(path.sep).join('/')));
+  const dangling = [];
+  PAGES.forEach(page => {
+    const html = fs.readFileSync(path.join(DIST, page), 'utf8');
+    const re = /(?:src|href)\s*=\s*"([^"#?]+)"/g;
+    let m;
+    while ((m = re.exec(html))) {
+      const ref = m[1];
+      if (/^(https?:)?\/\//.test(ref) || ref.startsWith('data:')) continue;
+      if (!distFiles.has(ref)) dangling.push(page + ' → ' + ref);
+    }
+    // fetch('...') 也要检查
+    const fre = /fetch\(\s*'([^']+)'/g;
+    while ((m = fre.exec(html))) {
+      if (!distFiles.has(m[1])) dangling.push(page + ' → fetch ' + m[1]);
+    }
+  });
+  if (dangling.length) {
+    console.error('✖ 打包后的页面引用了不存在的文件：');
+    dangling.forEach(d => console.error('   ' + d));
+    process.exit(1);
+  }
 
   const files = walk(DIST).sort();
   let total = 0;

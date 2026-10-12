@@ -1,6 +1,6 @@
-/* 乐谱文本 DSL 解析器测试 —— 解析器本体在 ../parser.js，页面和测试共用同一份，
+﻿/* 乐谱文本 DSL 解析器测试 —— 解析器本体在 ../parser.js，页面和测试共用同一份，
    避免两边不同步（曾经发生过：加了 vol/歌词，测试却在测旧的副本）。 */
-const { parseScore, formatScore, parsePitch, midiName, parseDur, round2 } = require('../parser.js');
+const { parseScore, formatScore, parsePitch, midiName, parseDur, round2 } = require('../src/parser.js');
 
 
 /**

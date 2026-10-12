@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 乐谱格式化：把每个小节拆成单独一行，让文本结构和谱面一致。
  *
  *   node format-score.js <输入.txt> [输出.txt]      # 不给输出就打印到屏幕
@@ -10,7 +10,7 @@
 const fs = require('fs');
 const path = require('path');
 // formatScore 本体在 ../parser.js —— 和页面共用同一份，别在这里再抄一遍
-const { formatScore } = require('../parser.js');
+const { formatScore } = require('../src/parser.js');
 
 
 if (require.main === module) {
