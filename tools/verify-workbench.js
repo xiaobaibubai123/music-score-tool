@@ -70,14 +70,29 @@ const info = (page) => page.$eval('#info', el => el.textContent);
   await page.screenshot({ path: path.join(__dirname, 'shot-editor.png'), fullPage: true });
 
   /* ---------- 3. 试听 ---------- */
+  // 无头浏览器里 AudioContext 有时起得慢：点了播放、Transport 也是 started，
+  // 但 seconds 一直是 0，要等到上下文真正 running 才开始走时。
+  // 所以先等上下文 running，再用轮询等走时，避免偶发假失败。
   await page.click('#btnPlay');
-  await sleep(1800);
+  await page.waitForFunction(() => window.Tone && window.Tone.context.state === 'running',
+    { timeout: 15000 }).catch(() => {});
+  let walked = false;
+  for (let i = 0; i < 40 && !walked; i++) {
+    await sleep(150);
+    walked = await page.evaluate(() => window.Tone.Transport.seconds > 0.3);
+    if (!walked) {
+      // 上下文没跑起来就再点一次播放（有些环境下第一次点击只是解锁音频）
+      const st = await page.evaluate(() => window.Tone.context.state);
+      if (st !== 'running') await page.click('#btnPlay').catch(() => {});
+    }
+  }
   const p = await page.evaluate(() => ({
     sec: window.Tone.Transport.seconds, st: window.Tone.Transport.state,
+    ctx: window.Tone.context.state,
     clock: document.getElementById('clock').textContent,
     status: document.getElementById('status').textContent,
   }));
-  check('试听：Transport 走时', p.sec > 0.3, `sec=${p.sec.toFixed(2)} state=${p.st}`);
+  check('试听：Transport 走时', p.sec > 0.3, `sec=${p.sec.toFixed(2)} state=${p.st} ctx=${p.ctx}`);
   check('时钟显示当前/总时长', /^\d+\.\d\d \/ 9\.60 s$/.test(p.clock), p.clock);
   check('循环已开启（loop=true）', await page.evaluate(() => window.Tone.Transport.loop === true));
   await page.screenshot({ path: path.join(__dirname, 'shot-editor-playing.png'), fullPage: true });

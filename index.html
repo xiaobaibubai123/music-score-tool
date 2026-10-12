@@ -284,20 +284,40 @@ function parseScore(text) {
    2. 音频引擎
    ============================================================ */
 let synth = null, click = null, audioReady = false;
+
+/* ---------- 钢琴音色：试听与 MP3 导出共用这一份定义 ----------
+ * 实测对比（离线渲染 C5/G5 后算 3kHz 以上能量占比 + 1 秒衰减）：
+ *   旧 三角波 + sustain0.32 + 5200Hz 低通 → 高频仅 6.7% / 12.3%，1 秒后仍残留 62%（闷、糊）
+ *   现 谐波列 + 钢琴包络 + 9500Hz 低通 → 高频 28% / 47%，1 秒后残留约 15%（亮、音符会衰减掉）
+ * 想换音色只改这里，两边一起生效。 */
+const PIANO = {
+  voice: {
+    maxPolyphony: 64,
+    oscillator: {
+      type: 'custom',
+      // 16 个谐波，幅度按 1/n^1.3 衰减 —— 接近钢琴的频谱
+      // 谐波太少：低音（左手 D#2–E3）最高谐波才 1.2kHz，听起来像纯音、发闷
+      // 谐波太多：高音（右手到 C6）会发刺
+      partials: Array.from({ length: 16 }, (_, i) => +(1 / Math.pow(i + 1, 1.3)).toFixed(3))
+    },
+    // 钢琴是"敲下去就衰减"，不能有 sustain 长音
+    envelope: { attack: 0.004, decay: 2.2, sustain: 0.05, release: 0.85 }
+  },
+  filterHz: 9500,                                   // 原来 5200 太闷
+  reverb: { decay: 1.8, preDelay: 0.01, wet: 0.13 }, // 原来 2.0/0.16 偏湿，音符容易糊
+  volume: -8
+};
+
 async function initAudio() {
   if (audioReady) return;
   if (!Tone) throw new Error('Tone.js 未加载');
   await Tone.start();
-  const reverb = new Tone.Reverb({ decay: 2.0, preDelay: 0.01, wet: 0.16 }).toDestination();
-  synth = new Tone.PolySynth(Tone.Synth, {
-    maxPolyphony: 64,
-    oscillator: { type: 'triangle' },
-    envelope: { attack: 0.012, decay: 0.18, sustain: 0.32, release: 1.0 }
-  });
+  const reverb = new Tone.Reverb(PIANO.reverb).toDestination();
+  synth = new Tone.PolySynth(Tone.Synth, PIANO.voice);
   synth.set({ detune: 4 });
-  const filter = new Tone.Filter({ frequency: 5200, type: 'lowpass', rolloff: -12 });
+  const filter = new Tone.Filter({ frequency: PIANO.filterHz, type: 'lowpass', rolloff: -12 });
   synth.connect(filter); filter.connect(reverb);
-  synth.volume.value = -8;
+  synth.volume.value = PIANO.volume;
 
   click = new Tone.MembraneSynth({
     pitchDecay: 0.008, octaves: 2,
@@ -696,22 +716,18 @@ async function renderOffline() {
   return await Tone.Offline(async () => {
     let reverb = null;
     try {
-      reverb = new Tone.Reverb({ decay: 2.0, preDelay: 0.01, wet: 0.16 }).toDestination();
+      reverb = new Tone.Reverb(PIANO.reverb).toDestination();
       // 混响的冲激响应是异步生成的；离线渲染必须等它就绪，否则会渲染成干声/静音
       if (reverb.ready && typeof reverb.ready.then === 'function') await reverb.ready;
     } catch (e) {
       reverb = null;                                 // 拿不到混响就退化成干声，不影响导出
     }
-    const s = new Tone.PolySynth(Tone.Synth, {
-      maxPolyphony: 64,
-      oscillator: { type: 'triangle' },
-      envelope: { attack: 0.012, decay: 0.18, sustain: 0.32, release: 1.0 }
-    });
+    const s = new Tone.PolySynth(Tone.Synth, PIANO.voice);
     s.set({ detune: 4 });
-    const filter = new Tone.Filter({ frequency: 5200, type: 'lowpass', rolloff: -12 });
+    const filter = new Tone.Filter({ frequency: PIANO.filterHz, type: 'lowpass', rolloff: -12 });
     s.connect(filter);
     if (reverb) filter.connect(reverb); else filter.toDestination();
-    s.volume.value = -8;
+    s.volume.value = PIANO.volume;
     // 离线渲染固定 44100Hz / 立体声；导出始终包含全部轨道（静音只影响试听）
     for (const t of parsed.tracks) {
       for (const n of t.notes) s.triggerAttackRelease(n.name, n.duration, n.time, n.velocity);

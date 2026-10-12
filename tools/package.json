@@ -8,7 +8,8 @@
     "test:workbench": "node verify-workbench.js",
     "test:embed": "node verify-embed.js",
     "test:mp3": "node verify-mp3.js",
-    "test": "node parser-test.js && node verify-workbench.js && node verify-embed.js && node verify-mp3.js"
+    "test": "node parser-test.js && node verify-workbench.js && node verify-embed.js && node verify-mp3.js && node verify-timbre.js",
+    "test:timbre": "node verify-timbre.js"
   },
   "dependencies": {
     "@tonejs/midi": "^2.0.28",
