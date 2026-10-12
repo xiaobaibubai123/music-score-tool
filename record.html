@@ -141,7 +141,7 @@
     <kbd>V</kbd><kbd>G</kbd><kbd>B</kbd><kbd>H</kbd><kbd>N</kbd><kbd>J</kbd><kbd>M</kbd> 是下面那个八度，
     <kbd>Q</kbd><kbd>2</kbd><kbd>W</kbd><kbd>3</kbd><kbd>E</kbd>…<kbd>Y</kbd><kbd>7</kbd><kbd>U</kbd> 是上面那个八度
     （琴键底部有蓝线的那一段）。<kbd>←</kbd><kbd>→</kbd> 换音区。
-    按得越深越长，音就越长；想弹和弦就同时按几个键。
+    按住的时间越长，音就越长；想弹和弦就同时按几个键。
   </div>
 </div>
 
@@ -308,7 +308,7 @@ function updateLastNote(midi) {
   lastNoteTimer = setTimeout(() => { el.textContent = kbBandText(); }, 1200);
 }
 function kbBandText() {
-  return '键盘音区 ' + midiName(kbBase) + ' ~ ' + midiName(kbBase + 28) + '（← → 换）';
+  return '键盘音区 ' + midiName(kbBase) + ' – ' + midiName(kbBase + 28) + '（← → 换）';
 }
 
 /* ============================================================

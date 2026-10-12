@@ -76,6 +76,26 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const kind = await page.evaluate(() => (typeof instrumentKind !== 'undefined' ? instrumentKind : '(未定义)'));
   check('钢琴音源就绪（真实采样）', kind === 'sampler', kind);
 
+  /* ---------- 3.5 预备拍：先倒数一小节，这期间弹的不算 ---------- */
+  await page.evaluate(() => {
+    document.getElementById('bpm').value = '120';       // 4/4 一小节 = 4 拍 = 2 秒
+    document.getElementById('chkCountin').checked = true;
+  });
+  await page.click('#btnStart');
+  const inCountIn = await page.waitForFunction(() => REC.state === 'countin', { timeout: 10000 })
+    .then(() => true).catch(() => false);
+  const countText = inCountIn ? await page.evaluate(() => document.getElementById('recInfo').textContent) : '';
+  // 预备拍里弹一下，结束之后不该出现在乐谱里
+  await page.keyboard.down('KeyZ'); await sleep(150); await page.keyboard.up('KeyZ');
+  const counted = await page.evaluate(() => REC.events.length);
+  const toRec = await page.waitForFunction(() => REC.state === 'rec', { timeout: 15000 })
+    .then(() => true).catch(() => false);
+  await page.click('#btnEnd');
+  check('勾上「预备 1 小节」后会先倒数再开始录',
+        inCountIn && toRec && /预备/.test(countText), JSON.stringify(countText));
+  check('预备拍期间弹的音不会被录进去', counted === 0, counted + ' 个音');
+  await page.evaluate(() => { document.getElementById('chkCountin').checked = false; });
+
   /* ---------- 4. 键盘弹奏：按住要亮、松开要灭 ---------- */
   await page.keyboard.down('KeyZ');
   await sleep(120);
