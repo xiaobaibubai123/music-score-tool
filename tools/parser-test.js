@@ -190,6 +190,35 @@ time 4/4
   ok('中文曲名以 UTF-8 正确落盘',
      fromMidiText(back.header.name) === '小星星', fromMidiText(back.header.name));
 
+  // ---- ~ 延续（不重新击键）----
+  const hold = parseScore('bpm 120\ntime 4/4\n钢:\n C4:2 ~C4:2 |\n');
+  ok('~ 把音拉长而不是重新击一次键',
+     hold.tracks[0].notes.length === 1 && Math.abs(hold.tracks[0].notes[0].durBeats - 4) < 1e-9,
+     JSON.stringify(hold.tracks[0].notes));
+  ok('~ 版本无错误无警告', hold.errors.length === 0 && hold.warnings.length === 0,
+     JSON.stringify(hold.errors.concat(hold.warnings)));
+
+  const holdChord = parseScore('time 4/4\n钢:\n [C4 E4]:2 [~C4 G4]:2 |\n');
+  const hc = holdChord.tracks[0].notes;
+  ok('和弦里也能单独延续一个音',
+     hc.length === 3 &&
+     hc.find(n => n.name === 'C4').durBeats === 4 &&
+     hc.find(n => n.name === 'E4').durBeats === 2 &&
+     hc.find(n => n.name === 'G4').durBeats === 2,
+     hc.map(n => n.name + ':' + n.durBeats).join(' '));
+
+  const badHold = parseScore('time 4/4\n钢:\n ~C4:2 r:2 |\n');
+  ok('凭空延续一个没在响的音会报错',
+     badHold.errors.length === 1 && /正在响的 C4/.test(badHold.errors[0].msg),
+     JSON.stringify(badHold.errors));
+
+  const crossBar = parseScore('time 4/4\n钢:\n [C4 E4]:w | [~C4 ~E4]:w |\n');
+  ok('跨小节的延续也认（两行都是 4 拍）', crossBar.warnings.length === 0, JSON.stringify(crossBar.warnings));
+  ok('跨小节延续后仍是两个长音',
+     crossBar.tracks[0].notes.length === 2 &&
+     crossBar.tracks[0].notes.every(n => Math.abs(n.durBeats - 8) < 1e-9),
+     crossBar.tracks[0].notes.map(n => n.name + ':' + n.durBeats).join(' '));
+
   console.log('\n===== ' + (fails === 0 ? '全部通过' : fails + ' 项失败') + ' =====');
   if (fails) process.exitCode = 1;
 }

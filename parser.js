@@ -121,7 +121,7 @@
   
         let durStr = null, items = null;
         const chord = /^\[([^\]]*)\](?::(.*))?$/.exec(tok);
-        const atom = /^([A-Ga-g][#bx]*-?\d+|[A-Za-z_]+|[-_])(?::(.*))?$/.exec(tok);
+        const atom = /^(~?[A-Ga-g][#bx]*-?\d+|[A-Za-z_]+|[-_])(?::(.*))?$/.exec(tok);
         if (chord) { items = chord[1].trim().split(/\s+/).filter(Boolean); durStr = chord[2]; }
         else if (atom) { items = [atom[1]]; durStr = atom[2]; }
         else { errors.push({ line, msg: '看不懂的记号 "' + tok + '"（音符写成 C4 / F#3 / [C4 E4 G4]:2 / r，小节线用 |）' }); continue; }
@@ -132,6 +132,24 @@
         const start = cur.pos;
         for (const it of items) {
           if (/^(r|rest|_|-)$/i.test(it)) continue;
+          /* ~C4 = 接着前面那个还在响的 C4 往下拉长，不重新击键。
+             录音页录"按住不放"时靠它，否则一个音被拆成好几段、回放会变成反复敲同一个键。 */
+          const contM = /^~(.*)$/.exec(it);
+          if (contM) {
+            const cMidi = parsePitch(contM[1]);
+            if (cMidi == null) { errors.push({ line, msg: '无法识别的音名 "' + contM[1] + '"' }); continue; }
+            const prev = cur.notes.find(n => n.midi === cMidi &&
+              Math.abs(n.beat + n.durBeats - start) < 1e-6);
+            if (!prev) {
+              errors.push({ line, msg: '"' + it + '" 想延续一个正在响的音，但这里并没有正在响的 ' +
+                contM[1] + '（~ 只能接在还没结束的那个音后面）' });
+              continue;
+            }
+            /* 精确到位、不要 round2：1/32 网格下 0.375 拍被四舍五入成 0.38 之后，
+               下一个 ~ 就对不上"这个音到底响到哪"了（真发生过，102 组模糊测试全报这个错）。 */
+            prev.durBeats = Math.round(((start + dur) - prev.beat) * 1e6) / 1e6;
+            continue;
+          }
           const midi = parsePitch(it);
           if (midi == null) { errors.push({ line, msg: '无法识别的音名 "' + it + '"（写成 C4、F#3、Bb5 这样）' }); continue; }
           cur.notes.push({ midi, name: midiName(midi), beat: start, durBeats: dur, velocity: 0.85 });

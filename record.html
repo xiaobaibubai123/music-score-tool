@@ -1,0 +1,836 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>演奏录音 · 弹一遍自动变成乐谱</title>
+<!-- vendor/ 是长期强缓存的，换库版本时把下面的 v 数字加一即可让访问者更新 -->
+<script src="vendor/Tone.js?v=2"></script>
+<style>
+  :root{--bg:#12141a;--panel:#1b1e27;--line:#2c3140;--fg:#e8ecf4;--dim:#98a2b8;
+        --accent:#4da3ff;--ok:#3ddc97;--bad:#ff6b6b;--warn:#ffc857;--rec:#ff4d5e;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font:14px/1.6 "Segoe UI","Microsoft YaHei",system-ui,sans-serif;padding:16px 20px 60px}
+  header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:6px}
+  h1{font-size:19px;margin:0}
+  nav a{color:var(--accent);text-decoration:none;font-size:13px;border:1px solid var(--line);
+        padding:5px 12px;border-radius:7px;background:#232a37}
+  nav a:hover{background:#2f3948}
+  .sub{color:var(--dim);font-size:13px;margin:0 0 14px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+         padding:14px 16px;margin-bottom:14px}
+  .panel h2{font-size:14px;margin:0 0 10px;color:var(--accent);
+            text-transform:uppercase;letter-spacing:.5px}
+  button{background:#28303f;color:var(--fg);border:1px solid var(--line);border-radius:7px;
+         padding:7px 14px;font-size:13px;cursor:pointer;margin:0 6px 6px 0}
+  button:hover:not(:disabled){background:#333d4f;border-color:#465268}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#08131f;font-weight:600}
+  button.primary:hover:not(:disabled){background:#69b4ff}
+  button.rec{background:var(--rec);border-color:var(--rec);color:#1a0308;font-weight:700}
+  button.rec:hover:not(:disabled){background:#ff6b79}
+  button:disabled{opacity:.35;cursor:not-allowed}
+  #status{font-weight:600;padding:9px 12px;border-radius:8px;background:#20242f;
+          border-left:4px solid var(--dim);margin-bottom:12px;min-height:20px}
+  #status.ok{border-left-color:var(--ok)} #status.bad{border-left-color:var(--bad)}
+  #status.warn{border-left-color:var(--warn)} #status.rec{border-left-color:var(--rec)}
+  .mono{font-family:Consolas,monospace;font-size:12px;color:var(--dim)}
+  .grid{display:grid;grid-template-columns:minmax(340px,1fr) minmax(420px,1.1fr);gap:14px;align-items:start}
+  @media(max-width:980px){.grid{grid-template-columns:1fr}}
+  select,input[type=number],input[type=text]{background:#28303f;color:var(--fg);border:1px solid var(--line);
+       border-radius:7px;padding:6px 9px;font-size:13px}
+  label.chk{display:inline-flex;align-items:center;gap:5px;margin-right:12px;font-size:13px;cursor:pointer}
+  input[type=checkbox]{accent-color:var(--accent)}
+  .row{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:8px}
+  /* ---------- 钢琴 ---------- */
+  .pianowrap{overflow-x:auto;padding:0 0 6px}
+  .piano{position:relative;height:176px;min-width:900px;background:#0e1016;
+         border:1px solid var(--line);border-radius:8px;touch-action:none;user-select:none;
+         -webkit-user-select:none}
+  .key{position:absolute;top:0;cursor:pointer}
+  .key.white{height:100%;background:linear-gradient(#ffffff,#e4e8f0);
+             border:1px solid #b9c0cf;border-radius:0 0 5px 5px;z-index:1}
+  .key.white.on{background:linear-gradient(#a8d2ff,#4da3ff)}
+  .key.white.kb{border-bottom:5px solid var(--accent)}
+  .key.black{height:62%;background:linear-gradient(#333a4b,#0b0d13);
+             border:1px solid #000;border-radius:0 0 4px 4px;z-index:2}
+  .key.black.on{background:linear-gradient(#5fb0ff,#1d5f9e)}
+  .key.black.kb{border-bottom:4px solid var(--accent)}
+  .key span{position:absolute;bottom:4px;left:0;width:100%;text-align:center;
+            font:10px Consolas,monospace;color:#7d879b;pointer-events:none}
+  .key.black span{color:#9aa5bb}
+  .key.white.kb span{color:#3f6d9e}
+  #roll{width:100%;height:220px;background:#0e1016;border:1px solid var(--line);
+        border-radius:8px;display:block;margin-bottom:8px}
+  #out{width:100%;height:300px;background:#0e1016;color:#dfe6f3;border:1px solid var(--line);
+       border-radius:8px;padding:12px 14px;font:13px/1.8 Consolas,"Courier New",monospace;
+       resize:vertical;tab-size:2;white-space:pre;overflow:auto}
+  #out:focus{outline:none;border-color:var(--accent)}
+  #msgs{margin-top:8px;max-height:130px;overflow:auto}
+  .msg{font:12px/1.6 Consolas,monospace;padding:5px 9px;border-radius:6px;margin-bottom:5px;
+       background:#2a1d1f;border-left:3px solid var(--bad)}
+  .msg.warn{background:#2a2618;border-left-color:var(--warn)}
+  .msg.ok{background:#182a22;border-left-color:var(--ok)}
+  .hint{color:var(--dim);font-size:12.5px;margin-top:8px}
+  kbd{background:#0e1016;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;
+      padding:0 5px;font:11px Consolas,monospace;color:#9fd0ff}
+  .dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--dim);
+       margin-right:6px;vertical-align:-1px}
+  .dot.live{background:var(--rec);animation:blink .9s infinite}
+  @keyframes blink{50%{opacity:.25}}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🎹 演奏录音</h1>
+  <nav><a href="index.html">🎼 乐谱工作台</a></nav>
+</header>
+<p class="sub">用鼠标点琴键、或者直接用电脑键盘弹 —— 录完点「结束」，你弹的东西自动变成乐谱脚本，可以下载、也可以丢进工作台试听和导出 MP3。</p>
+
+<div id="status">点一下页面（或直接按 <kbd>Z</kbd>）激活音频，然后按「● 开始录音」</div>
+
+<!-- ============ 1 · 录音控制 ============ -->
+<div class="panel">
+  <h2>1 · 录音控制</h2>
+  <div class="row">
+    <button class="rec" id="btnStart">⏺ 开始录音</button>
+    <button id="btnPause">⏸ 暂停</button>
+    <button id="btnResume">▶ 继续</button>
+    <button id="btnEnd">⏹ 结束并生成乐谱</button>
+    <span style="flex:1"></span>
+    <button id="btnUndo">↶ 撤销上一个音</button>
+    <button id="btnReplay">🔊 回放我弹的</button>
+    <button id="btnClear">🗑 清空重录</button>
+  </div>
+  <div class="row">
+    <span class="mono">速度</span><input type="number" id="bpm" min="30" max="240" step="1" value="90" style="width:74px"><span class="mono">BPM</span>
+    <span class="mono" style="margin-left:8px">拍号</span>
+    <select id="timeSig">
+      <option value="4/4" selected>4/4</option>
+      <option value="3/4">3/4</option>
+      <option value="2/4">2/4</option>
+      <option value="6/8">6/8</option>
+    </select>
+    <span class="mono" style="margin-left:8px">量化</span>
+    <select id="grid"></select>
+    <label class="chk" style="margin-left:12px"><input type="checkbox" id="chkCountin" checked> 预备 1 小节</label>
+    <label class="chk"><input type="checkbox" id="chkClick" checked> 节拍器</label>
+  </div>
+  <div class="row">
+    <label class="chk"><input type="checkbox" id="chkTrim" checked> 去掉开头空白</label>
+    <label class="chk"><input type="checkbox" id="chkHands"> 分成左右手两条轨道，分界</label>
+    <select id="splitMidi"></select>
+  </div>
+  <div class="mono" id="recInfo" style="margin-top:10px"><span class="dot"></span>待机</div>
+</div>
+
+<!-- ============ 2 · 钢琴 ============ -->
+<div class="panel">
+  <h2>2 · 弹吧（鼠标点 / 键盘敲 / 手机上直接按）</h2>
+  <div class="pianowrap"><div id="piano" class="piano"></div></div>
+  <div class="row">
+    <button id="octDown">◀ 音区降低</button>
+    <button id="octUp">音区升高 ▶</button>
+    <button id="btnPanic">✋ 全部松开</button>
+    <span class="mono" id="kbInfo"></span>
+  </div>
+  <div class="hint">
+    键盘：<kbd>Z</kbd><kbd>S</kbd><kbd>X</kbd><kbd>D</kbd><kbd>C</kbd>…
+    <kbd>V</kbd><kbd>G</kbd><kbd>B</kbd><kbd>H</kbd><kbd>N</kbd><kbd>J</kbd><kbd>M</kbd> 是下面那个八度，
+    <kbd>Q</kbd><kbd>2</kbd><kbd>W</kbd><kbd>3</kbd><kbd>E</kbd>…<kbd>Y</kbd><kbd>7</kbd><kbd>U</kbd> 是上面那个八度
+    （琴键底部有蓝线的那一段）。<kbd>←</kbd><kbd>→</kbd> 换音区。
+    按得越深越长，音就越长；想弹和弦就同时按几个键。
+  </div>
+</div>
+
+<div class="grid">
+  <div>
+    <!-- ============ 3 · 录到的音符 ============ -->
+    <div class="panel">
+      <h2>3 · 录到的音符</h2>
+      <canvas id="roll"></canvas>
+      <div class="mono" id="stats">还没有音符</div>
+    </div>
+  </div>
+
+  <div>
+    <!-- ============ 4 · 生成的乐谱脚本 ============ -->
+    <div class="panel">
+      <h2>4 · 生成的乐谱脚本</h2>
+      <div class="row" style="margin:0 0 8px">
+        <span class="mono">曲名</span>
+        <input type="text" id="title" value="我的演奏" style="width:190px">
+      </div>
+      <textarea id="out" spellcheck="false" placeholder="按「⏹ 结束并生成乐谱」之后，这里会出现你刚弹的乐谱脚本。"></textarea>
+      <div class="row">
+        <button class="primary" id="btnDownload">⬇ 下载 .txt</button>
+        <button id="btnCopy">📋 复制脚本</button>
+        <button id="btnOpenBench">🎼 在乐谱工作台里打开</button>
+      </div>
+      <div id="msgs"></div>
+    </div>
+  </div>
+</div>
+
+<script src="parser.js"></script>
+<script src="audio.js"></script>
+<script src="recorder.js"></script>
+<script>
+"use strict";
+/* ============================================================
+   0. 基础工具
+   ============================================================ */
+const $ = (id) => document.getElementById(id);
+const statusEl = $('status');
+function setStatus(msg, kind) { statusEl.textContent = msg; statusEl.className = kind || ''; }
+function fail(where, err) {
+  const m = (err && (err.message || err)) + '';
+  setStatus('❌ ' + where + ' 失败：' + m, 'bad');
+  console.error(where, err);
+}
+const Tone = window.Tone;
+const { midiName, parseScore } = window.ScoreParser;
+const Recorder = window.ScoreRecorder;
+const PIANO = window.ScoreAudio.PIANO;
+
+/* ============================================================
+   1. 音频引擎（和乐谱工作台共用 audio.js，音色不会两边不一样）
+   ============================================================ */
+let synth = null, click = null, audioReady = false, instrumentKind = '';
+const ctxNow = () => Tone.context.currentTime;
+
+async function initAudio() {
+  if (audioReady) return;
+  if (!Tone) throw new Error('Tone.js 未加载');
+  await Tone.start();
+  const loadingMsg = '🎹 正在载入钢琴音色…（首次约 1.9 MB，之后就缓存了）';
+  setStatus(loadingMsg);
+  const reverb = new Tone.Reverb(PIANO.reverb).toDestination();
+  const inst = await window.ScoreAudio.buildInstrument(Tone);
+  inst.out.connect(reverb);
+  inst.node.volume.value = PIANO.volume;
+  synth = inst.node;
+  instrumentKind = inst.kind;
+  click = new Tone.MembraneSynth({
+    pitchDecay: 0.008, octaves: 2,
+    envelope: { attack: 0.001, decay: 0.03, sustain: 0, release: 0.01 }
+  }).toDestination();
+  click.volume.value = -14;
+  audioReady = true;
+  // 采样是异步下载的，用户可能在这期间就按下了琴键 —— 加载完成后把这些音补上
+  pressed.forEach((m) => { try { window.ScoreAudio.attack(synth, m, 0.85, ctxNow()); } catch (e) {} });
+  if ($('status').textContent === loadingMsg) {
+    setStatus(instrumentKind === 'sampler'
+      ? '🎹 钢琴音色已就绪（真实采样）'
+      : '⚠ 采样没加载成功，已退回合成音色（功能正常）',
+      instrumentKind === 'sampler' ? 'ok' : 'warn');
+  }
+}
+document.addEventListener('pointerdown', () => { initAudio().catch((e) => fail('初始化音频', e)); });
+
+/* ============================================================
+   2. 录音状态
+   ------------------------------------------------------------
+   idle   待机
+   countin 预备拍（还没开始记）
+   rec    录音中
+   paused 暂停（时钟冻住，暂停的时间段不会被算进乐谱）
+   done   已结束，脚本已生成（还能回放 / 撤销 / 重新录）
+   ============================================================ */
+const REC = { state: 'idle', t0: 0, origin: 0, pauseAt: 0, events: [], held: new Map() };
+const pressed = new Set();          // 当前物理按住的音（不管有没有在录）
+const kbHeld = new Map();           // e.code → midi
+let kbBase = 48;                    // 电脑键盘的起始音（默认 C3）
+
+const recTime = () => ctxNow() - REC.origin;
+const spbNow  = () => 60 / (Math.max(30, Math.min(240, +$('bpm').value || 90)));
+const barBeats = () => Recorder.beatsPerBarOf($('timeSig').value);
+
+/* ============================================================
+   3. 按键 → 出声 + 记录
+   ============================================================ */
+function markKey(midi, on) {
+  const el = $('piano').querySelector('.key[data-midi="' + midi + '"]');
+  if (el) el.classList.toggle('on', on);
+}
+
+function recordOn(midi, vel) {
+  if (REC.state !== 'rec') return;
+  if (REC.held.has(midi)) return;                     // 同一个音重复按下不重复记
+  const ev = { midi, on: recTime(), off: null, velocity: vel };
+  REC.events.push(ev);
+  REC.held.set(midi, ev);
+}
+
+function recordOff(midi) {
+  const ev = REC.held.get(midi);
+  if (!ev) return;
+  ev.off = Math.max(ev.on + 0.04, recTime());         // 太短的一碰至少给 40ms，否则量化后消失
+  REC.held.delete(midi);
+}
+
+function noteOn(midi, vel) {
+  if (midi < 0 || midi > 127 || pressed.has(midi)) return;
+  const v = vel == null ? 0.85 : vel;
+  pressed.add(midi);
+  markKey(midi, true);
+  if (!audioReady) initAudio().catch((e) => fail('初始化音频', e));
+  else window.ScoreAudio.attack(synth, midi, v, ctxNow());
+  recordOn(midi, v);
+  updateLastNote(midi);
+  dirty = true;
+}
+
+function noteOff(midi) {
+  if (!pressed.has(midi)) return;
+  pressed.delete(midi);
+  markKey(midi, false);
+  if (audioReady) { try { window.ScoreAudio.release(synth, midi, ctxNow()); } catch (e) {} }
+  recordOff(midi);
+  dirty = true;
+}
+
+function releaseAll() {
+  pressed.forEach((m) => { if (audioReady) { try { window.ScoreAudio.release(synth, m, ctxNow()); } catch (e) {} } });
+  pressed.clear();
+  kbHeld.clear();
+  REC.held.clear();
+  $('piano').querySelectorAll('.key.on').forEach((el) => el.classList.remove('on'));
+}
+
+let lastNoteTimer = null;
+function updateLastNote(midi) {
+  const el = $('kbInfo');
+  el.textContent = kbBandText() + ' · 刚弹 ' + midiName(midi);
+  clearTimeout(lastNoteTimer);
+  lastNoteTimer = setTimeout(() => { el.textContent = kbBandText(); }, 1200);
+}
+function kbBandText() {
+  return '键盘音区 ' + midiName(kbBase) + ' ~ ' + midiName(kbBase + 28) + '（← → 换）';
+}
+
+/* ============================================================
+   4. 电脑键盘映射
+   ============================================================ */
+/* 低八度：Z X C V B N M（白键）S D G H J（黑键）
+   高八度：Q W E R T Y U（白键）2 3 5 6 7（黑键）
+   再往上补 I O P，够得到更高的音 */
+const KEYMAP = {
+  KeyZ: 0, KeyS: 1, KeyX: 2, KeyD: 3, KeyC: 4, KeyV: 5, KeyG: 6, KeyB: 7,
+  KeyH: 8, KeyN: 9, KeyJ: 10, KeyM: 11,
+  KeyQ: 12, Digit2: 13, KeyW: 14, Digit3: 15, KeyE: 16, KeyR: 17, Digit5: 18,
+  KeyT: 19, Digit6: 20, KeyY: 21, Digit7: 22, KeyU: 23,
+  KeyI: 24, Digit9: 25, KeyO: 26, Digit0: 27, KeyP: 28
+};
+const isTyping = (e) => e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);
+
+window.addEventListener('keydown', (e) => {
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
+    if (isTyping(e)) return;
+    e.preventDefault();
+    shiftOct(e.code === 'ArrowLeft' ? -12 : 12);
+    return;
+  }
+  if (e.code === 'Space') { e.preventDefault(); return; }   // 别让空格把页面滚下去
+  if (isTyping(e)) return;
+  const off = KEYMAP[e.code];
+  if (off == null || kbHeld.has(e.code)) return;             // 按住不放不重复触发
+  e.preventDefault();
+  const midi = kbBase + off;
+  kbHeld.set(e.code, midi);
+  noteOn(midi, 0.85);
+});
+window.addEventListener('keyup', (e) => {
+  const midi = kbHeld.get(e.code);
+  if (midi == null) return;
+  kbHeld.delete(e.code);
+  noteOff(midi);
+});
+window.addEventListener('blur', () => releaseAll());
+
+function shiftOct(d) {
+  const next = Math.max(36, Math.min(60, kbBase + d));
+  if (next === kbBase) return;
+  releaseAll();
+  kbBase = next;
+  paintKbBand();
+  $('kbInfo').textContent = kbBandText();
+}
+
+/* ============================================================
+   5. 钢琴键盘（画出来 + 鼠标/触摸）
+   ============================================================ */
+const PIANO_LO = 36, PIANO_HI = 96;                  // C2 ~ C7
+const BLACK = [1, 3, 6, 8, 10];
+const isBlack = (m) => BLACK.indexOf(((m % 12) + 12) % 12) >= 0;
+
+function buildPiano() {
+  const host = $('piano');
+  host.innerHTML = '';
+  const whites = [];
+  for (let m = PIANO_LO; m <= PIANO_HI; m++) if (!isBlack(m)) whites.push(m);
+  const unit = 100 / whites.length;
+  const bw = unit * 0.62;
+  whites.forEach((m, i) => {
+    const el = document.createElement('div');
+    el.className = 'key white';
+    el.dataset.midi = m;
+    el.style.left = (i * unit) + '%';
+    el.style.width = unit + '%';
+    if (m % 12 === 0) el.innerHTML = '<span>' + midiName(m) + '</span>';
+    host.appendChild(el);
+  });
+  for (let m = PIANO_LO; m <= PIANO_HI; m++) {
+    if (!isBlack(m)) continue;
+    const i = whites.indexOf(m - 1);                 // 黑键永远夹在两个白键之间
+    if (i < 0) continue;
+    const el = document.createElement('div');
+    el.className = 'key black';
+    el.dataset.midi = m;
+    el.style.left = ((i + 1) * unit - bw / 2) + '%';
+    el.style.width = bw + '%';
+    host.appendChild(el);
+  }
+  paintKbBand();
+}
+
+/** 给电脑键盘当前覆盖的那两个八度加一条蓝线，让人知道敲键盘会响哪几个音 */
+function paintKbBand() {
+  $('piano').querySelectorAll('.key').forEach((el) => {
+    const m = +el.dataset.midi;
+    el.classList.toggle('kb', m >= kbBase && m <= kbBase + 28);
+  });
+}
+
+function midiAt(e) {
+  const el = document.elementFromPoint(e.clientX, e.clientY);
+  const k = el && el.closest ? el.closest('.key') : null;
+  return k ? +k.dataset.midi : null;
+}
+(function bindPiano() {
+  const host = $('piano');
+  const holders = new Map();                          // pointerId → midi
+  host.addEventListener('pointerdown', (e) => {
+    const m = midiAt(e);
+    if (m == null) return;
+    e.preventDefault();
+    try { host.setPointerCapture(e.pointerId); } catch (err) {}
+    holders.set(e.pointerId, m);
+    noteOn(m, 0.9);
+  });
+  host.addEventListener('pointermove', (e) => {
+    if (!holders.has(e.pointerId)) return;
+    const m = midiAt(e);
+    const prev = holders.get(e.pointerId);
+    if (m === prev) return;
+    holders.set(e.pointerId, m);
+    if (prev != null) noteOff(prev);                  // 按住滑过琴键 = 滑音
+    if (m != null) noteOn(m, 0.9);
+  });
+  const up = (e) => {
+    if (!holders.has(e.pointerId)) return;
+    const m = holders.get(e.pointerId);
+    holders.delete(e.pointerId);
+    if (m != null) noteOff(m);
+  };
+  host.addEventListener('pointerup', up);
+  host.addEventListener('pointercancel', up);
+  host.addEventListener('lostpointercapture', up);
+  $('octDown').onclick = () => shiftOct(-12);
+  $('octUp').onclick = () => shiftOct(12);
+  $('btnPanic').onclick = () => { releaseAll(); setStatus('✋ 已松开所有音'); };
+})();
+
+/* ============================================================
+   6. 开始 / 暂停 / 继续 / 结束
+   ============================================================ */
+function setButtons() {
+  const s = REC.state;
+  $('btnStart').disabled  = !(s === 'idle' || s === 'done');
+  $('btnPause').disabled  = s !== 'rec';
+  $('btnResume').disabled = s !== 'paused';
+  $('btnEnd').disabled    = !(s === 'countin' || s === 'rec' || s === 'paused');
+  $('btnUndo').disabled   = REC.events.length === 0 || s === 'countin';
+  $('btnReplay').disabled = REC.events.length === 0 || s === 'countin' || s === 'rec' || s === 'paused';
+  $('btnClear').disabled  = REC.events.length === 0 && s === 'idle';
+  ['bpm', 'timeSig', 'chkCountin', 'chkClick'].forEach((id) => { $(id).disabled = (s === 'rec' || s === 'countin'); });
+  $('btnStart').textContent = (s === 'done') ? '⏺ 再录一次' : '⏺ 开始录音';
+}
+
+function killTransport() {
+  try { Tone.Transport.stop(); Tone.Transport.cancel(); Tone.Transport.seconds = 0; } catch (e) {}
+}
+
+async function startRec() {
+  try { await initAudio(); } catch (e) { return fail('初始化音频', e); }
+  killTransport();
+  releaseAll();
+  REC.events = [];
+  REC.held.clear();
+  dirty = true;
+  $('out').value = '';
+  renderCheck(null);
+
+  const spb = spbNow();
+  const countIn = $('chkCountin').checked ? Math.round(barBeats()) : 0;
+  const t0 = ctxNow() + 0.35;                        // 留一点余量，第一下节拍器才来得及排程
+  REC.t0 = t0;
+  REC.origin = t0 + countIn * spb;
+  REC.state = countIn > 0 ? 'countin' : 'rec';
+
+  let idx = 0;
+  Tone.Transport.seconds = 0;
+  Tone.Transport.scheduleRepeat((time) => {
+    const i = idx++;
+    const inCountIn = i < countIn;
+    if (!inCountIn && !$('chkClick').checked) return;
+    const accent = i % Math.round(barBeats()) === 0;
+    try { click.triggerAttackRelease(accent ? 'G5' : 'C5', 0.02, time); } catch (e) {}
+  }, spb, 0);
+  Tone.Transport.start(t0);
+
+  setButtons();
+  setStatus(REC.state === 'countin'
+    ? '🎵 预备拍…听到 1 就开始弹，这期间弹的音不会录进去'
+    : '🔴 正在录音 —— 开始弹吧', 'rec');
+}
+
+function doPause() {
+  if (REC.state !== 'rec') return;
+  REC.pauseAt = ctxNow();
+  const t = recTime();
+  REC.held.forEach((ev) => { ev.off = Math.max(ev.on + 0.04, t); });   // 按住不放的音先收尾
+  REC.held.clear();
+  releaseAll();
+  try { Tone.Transport.pause(); } catch (e) {}
+  REC.state = 'paused';
+  setButtons();
+  setStatus('⏸ 已暂停 —— 暂停多久都不算进乐谱，按「▶ 继续」接着弹', 'warn');
+}
+
+function doResume() {
+  if (REC.state !== 'paused') return;
+  REC.origin += ctxNow() - REC.pauseAt;              // 把暂停的这段整体挪掉
+  try { Tone.Transport.start(); } catch (e) {}
+  REC.state = 'rec';
+  setButtons();
+  setStatus('🔴 继续录音', 'rec');
+}
+
+function doEnd() {
+  if (REC.state === 'idle' || REC.state === 'done') return;
+  const t = recTime();
+  REC.held.forEach((ev) => { ev.off = Math.max(ev.on + 0.04, t); });
+  REC.held.clear();
+  releaseAll();
+  killTransport();
+  REC.state = 'done';
+  setButtons();
+  generate();
+}
+
+function undo() {
+  if (!REC.events.length) return;
+  const ev = REC.events.pop();
+  if (ev.off == null) { REC.held.delete(ev.midi); pressed.delete(ev.midi); markKey(ev.midi, false); }
+  dirty = true;
+  if (REC.state === 'done' || REC.state === 'idle') generate();
+  updateStats();
+  setStatus('↶ 已撤销 ' + midiName(ev.midi), 'warn');
+}
+
+function clearAll() {
+  killTransport();
+  releaseAll();
+  REC.events = [];
+  REC.held.clear();
+  REC.state = 'idle';
+  $('out').value = '';
+  renderCheck(null);
+  dirty = true;
+  setButtons();
+  updateStats();
+  setStatus('🗑 已清空 —— 按「⏺ 开始录音」重新来一遍');
+}
+
+async function replay() {
+  if (!REC.events.length) return;
+  try { await initAudio(); } catch (e) { return fail('初始化音频', e); }
+  releaseAll();
+  killTransport();
+  const beat = 0.25;
+  Tone.Transport.seconds = 0;
+  for (const ev of REC.events) {
+    const off = ev.off == null ? ev.on + beat : ev.off;
+    const dur = Math.max(beat, off - ev.on);
+    Tone.Transport.schedule((time) => {
+      try { window.ScoreAudio.attack(synth, ev.midi, ev.velocity, time); } catch (e) {}
+    }, ev.on);
+    Tone.Transport.schedule((time) => {
+      try { window.ScoreAudio.release(synth, ev.midi, time); } catch (e) {}
+    }, ev.on + dur);
+  }
+  const total = REC.events.reduce((s, e) => Math.max(s, e.off == null ? e.on : e.off), 0);
+  Tone.Transport.start();
+  setStatus('🔊 正在回放你弹的 ' + REC.events.length + ' 个音…（约 ' + total.toFixed(1) + ' 秒）', 'ok');
+  setTimeout(() => { if (REC.state !== 'rec' && REC.state !== 'countin' && REC.state !== 'paused') killTransport(); },
+             (total + 2) * 1000);
+}
+
+/* ============================================================
+   7. 生成脚本
+   ============================================================ */
+function generate() {
+  const res = Recorder.build({
+    events: REC.events,
+    bpm: Math.max(30, Math.min(240, +$('bpm').value || 90)),
+    timeSig: $('timeSig').value,
+    grid: $('grid').value,
+    title: $('title').value.trim() || '我的演奏',
+    splitHands: $('chkHands').checked,
+    splitMidi: +$('splitMidi').value,
+    trimLead: $('chkTrim').checked
+  });
+  if (!res.stats.notes) {
+    $('out').value = '';
+    renderCheck(null);
+    updateStats();
+    setStatus('⚠ 一个音都没录到 —— 先按「⏺ 开始录音」，弹几下，再按「⏹ 结束」', 'warn');
+    return;
+  }
+  $('out').value = res.text;
+  renderCheck(res.text);
+  updateStats();
+  const s = res.stats;
+  setStatus('✅ 已生成乐谱：' + s.notes + ' 个音 · ' + s.bars + ' 小节 · ' + s.seconds +
+            ' 秒 · ' + (s.hands > 1 ? '左右手两条轨道' : '一条轨道') + '。可以下载，或按「🎼 在乐谱工作台里打开」试听。', 'ok');
+}
+
+function renderCheck(text) {
+  const host = $('msgs');
+  host.innerHTML = '';
+  if (!text) {
+    $('btnDownload').disabled = true;
+    $('btnOpenBench').disabled = true;
+    return;
+  }
+  const p = parseScore(text);
+  const add = (msg, kind) => {
+    const d = document.createElement('div');
+    d.className = 'msg' + (kind ? ' ' + kind : '');
+    d.textContent = msg;
+    host.appendChild(d);
+  };
+  p.errors.slice(0, 6).forEach((e) => add('✖ ' + (e.line ? '第 ' + e.line + ' 行：' : '') + e.msg));
+  p.warnings.slice(0, 6).forEach((w) => add('⚠ ' + (w.line ? '第 ' + w.line + ' 行：' : '') + w.msg, 'warn'));
+  const notes = p.tracks.reduce((s, t) => s + t.notes.length, 0);
+  const ok = !p.errors.length && notes > 0;
+  if (ok && !p.warnings.length) {
+    add('✔ 自检通过：' + notes + ' 个音 / ' + p.tracks.length + ' 条轨道 / ' +
+        p.totalBeats + ' 拍 · ' + p.duration.toFixed(1) + ' 秒，小节线一条不差', 'ok');
+  }
+  $('btnDownload').disabled = !ok;
+  $('btnOpenBench').disabled = !ok;
+}
+
+function updateStats() {
+  const n = REC.events.length;
+  if (!n) { $('stats').textContent = '还没有音符'; return; }
+  const lo = Math.min.apply(null, REC.events.map((e) => e.midi));
+  const hi = Math.max.apply(null, REC.events.map((e) => e.midi));
+  const end = REC.events.reduce((s, e) => Math.max(s, e.off == null ? e.on : e.off), 0);
+  $('stats').textContent = n + ' 个音 · 音域 ' + midiName(lo) + ' ~ ' + midiName(hi) +
+                           ' · 共 ' + end.toFixed(1) + ' 秒';
+}
+
+/* ============================================================
+   8. 实时显示
+   ============================================================ */
+const roll = $('roll');
+const rctx = roll.getContext('2d');
+let dirty = true;
+
+function fitRoll() {
+  const r = roll.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  roll.width = Math.max(1, Math.round(r.width * dpr));
+  roll.height = Math.max(1, Math.round(r.height * dpr));
+  rctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  dirty = true;
+}
+
+function drawRoll() {
+  const W = roll.clientWidth, H = roll.clientHeight;
+  if (!W || !H) return;
+  rctx.clearRect(0, 0, W, H);
+  rctx.fillStyle = '#0e1016';
+  rctx.fillRect(0, 0, W, H);
+
+  const now = REC.state === 'idle' || REC.state === 'done' ? 0 : Math.max(0, recTime());
+  const evs = REC.events;
+  const end = evs.reduce((s, e) => Math.max(s, e.off == null ? Math.max(e.on, now) : e.off), 0);
+  const span = Math.max(4, end, now);
+
+  // 小节线（按当前 BPM / 拍号算）——量化是按小节对齐的，画出来心里有数
+  const barSec = barBeats() * spbNow();
+  if (barSec > 0.05) {
+    rctx.strokeStyle = '#242b39';
+    rctx.lineWidth = 1;
+    for (let t = barSec; t < span; t += barSec) {
+      const x = Math.round(t / span * W) + 0.5;
+      rctx.beginPath(); rctx.moveTo(x, 0); rctx.lineTo(x, H); rctx.stroke();
+    }
+  }
+
+  if (!evs.length) {
+    rctx.fillStyle = '#4c5468';
+    rctx.font = '13px Consolas,monospace';
+    rctx.fillText('录到的音符会画在这里', 12, H / 2 + 4);
+    return;
+  }
+
+  let lo = 127, hi = 0;
+  evs.forEach((e) => { if (e.midi < lo) lo = e.midi; if (e.midi > hi) hi = e.midi; });
+  if (hi - lo < 11) { const c = Math.round((hi + lo) / 2); lo = c - 6; hi = c + 6; }
+  const pad = Math.max(1, Math.round((hi - lo) * 0.08));
+  lo -= pad; hi += pad;
+  const rowH = Math.max(1.5, (H - 16) / (hi - lo + 1));
+
+  evs.forEach((e) => {
+    const a = Math.max(0, e.on);
+    const b = e.off == null ? Math.max(a + 0.05, now) : Math.max(e.off, a + 0.05);
+    const x = a / span * W;
+    const w = Math.max(2, (b - a) / span * W);
+    const y = H - 8 - (e.midi - lo + 1) * rowH;
+    rctx.fillStyle = e.off == null ? '#ff4d5e' : '#4da3ff';
+    rctx.fillRect(x, y, w, Math.max(2, rowH - 1));
+  });
+
+  if (REC.state === 'rec' || REC.state === 'paused') {
+    rctx.strokeStyle = '#ff4d5e';
+    rctx.lineWidth = 1;
+    const x = Math.round(now / span * W) + 0.5;
+    rctx.beginPath(); rctx.moveTo(x, 0); rctx.lineTo(x, H); rctx.stroke();
+  }
+}
+
+function tick() {
+  requestAnimationFrame(tick);
+  const s = REC.state;
+  if (s === 'countin') {
+    const el = ctxNow() - REC.t0;
+    const left = Math.max(1, Math.round(barBeats()) - Math.floor(Math.max(0, el) / spbNow()));
+    $('recInfo').innerHTML = '<span class="dot live"></span>预备 ' + left + ' …（还没开始记）';
+    if (recTime() >= 0) {
+      REC.state = 'rec'; setButtons();
+      setStatus('🔴 正在录音 —— 开始弹吧', 'rec');
+    }
+    dirty = true;
+  } else if (s === 'rec') {
+    $('recInfo').innerHTML = '<span class="dot live"></span>录音中 ' + recTime().toFixed(1) +
+      ' s · 已录 ' + REC.events.length + ' 个音';
+    dirty = true;
+  } else if (s === 'paused') {
+    $('recInfo').innerHTML = '<span class="dot"></span>已暂停（不计时）· 已录 ' + REC.events.length + ' 个音';
+  } else {
+    $('recInfo').innerHTML = '<span class="dot"></span>' +
+      (s === 'done' ? '已结束 · 已录 ' + REC.events.length + ' 个音' : '待机');
+  }
+  if (dirty) { dirty = false; drawRoll(); updateStats(); }
+}
+
+/* ============================================================
+   9. 导出 / 交接给工作台
+   ============================================================ */
+const STORE_KEY = 'musicmaker.score.dsl';            // 和工作台同一个 key，过去就能直接看到
+
+function download(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.rel = 'noopener';
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 4000);
+}
+const safeName = (s) => (s || 'score').replace(/[\\/:*?"<>|]/g, '_');
+
+/* ============================================================
+   10. 交互绑定 / 启动
+   ============================================================ */
+$('btnStart').onclick = () => startRec();
+$('btnPause').onclick = () => doPause();
+$('btnResume').onclick = () => doResume();
+$('btnEnd').onclick = () => doEnd();
+$('btnUndo').onclick = () => undo();
+$('btnClear').onclick = () => clearAll();
+$('btnReplay').onclick = () => replay();
+
+$('btnDownload').onclick = () => {
+  const text = $('out').value;
+  if (!text) return;
+  download(new Blob([text], { type: 'text/plain;charset=utf-8' }),
+           safeName($('title').value.trim() || '我的演奏') + '.txt');
+  setStatus('⬇ 已下载脚本（.txt），可以拖进乐谱工作台，也能用记事本改', 'ok');
+};
+$('btnCopy').onclick = async () => {
+  const text = $('out').value;
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    setStatus('📋 已复制到剪贴板', 'ok');
+  } catch (e) {
+    $('out').select();
+    setStatus('⚠ 浏览器不让自动复制，已帮你全选，按 Ctrl+C 即可', 'warn');
+  }
+};
+$('btnOpenBench').onclick = () => {
+  const text = $('out').value;
+  if (!text) return;
+  try { localStorage.setItem(STORE_KEY, text); } catch (e) {}
+  location.href = 'index.html';                      // 工作台启动时会读这个 key
+};
+$('out').addEventListener('input', () => renderCheck($('out').value));
+['bpm', 'timeSig', 'grid', 'chkTrim', 'chkHands', 'splitMidi', 'title'].forEach((id) => {
+  $(id).addEventListener('change', () => {
+    if (REC.state === 'done' || REC.state === 'idle') { if (REC.events.length) generate(); }
+    dirty = true;
+  });
+});
+$('chkHands').addEventListener('change', () => { $('splitMidi').disabled = !$('chkHands').checked; });
+window.addEventListener('resize', fitRoll);
+window.addEventListener('error', (e) => fail('未捕获错误', e.message));
+
+/* 下拉框选项 */
+(function fillSelects() {
+  const g = $('grid');
+  Recorder.GRIDS.forEach((x) => {
+    const o = document.createElement('option');
+    o.value = x.id; o.textContent = x.label;
+    if (x.id === '1/8') o.selected = true;
+    g.appendChild(o);
+  });
+  const sm = $('splitMidi');
+  for (let m = 55; m <= 67; m++) {
+    const o = document.createElement('option');
+    o.value = m; o.textContent = midiName(m);
+    if (m === 60) o.selected = true;
+    sm.appendChild(o);
+  }
+  sm.disabled = true;
+})();
+
+buildPiano();
+fitRoll();
+updateStats();
+setButtons();
+renderCheck(null);
+$('kbInfo').textContent = kbBandText();
+tick();
+setStatus('👋 按「⏺ 开始录音」→ 弹 → 按「⏹ 结束并生成乐谱」。也可以先直接敲 Z 键听听琴声。');
+</script>
+</body>
+</html>

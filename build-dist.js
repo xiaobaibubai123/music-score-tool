@@ -17,7 +17,7 @@ const path = require('path');
 const ROOT = __dirname;
 const DIST = path.join(ROOT, 'dist');
 
-const FILES = ['index.html', 'parser.js'];
+const FILES = ['index.html', 'record.html', 'parser.js', 'audio.js', 'recorder.js'];
 const DIRS = ['vendor', 'assets'];
 
 function copyDir(from, to) {
